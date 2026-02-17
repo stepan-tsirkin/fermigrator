@@ -13,6 +13,9 @@ class NeverTransform:
     def __call__(self, res):
         raise RuntimeError("This transform should never be called")
     
+    def __eq__(self, other):
+        return isinstance(other, NeverTransform)
+    
 nevertransform = NeverTransform()
 
 class TabulatorWaveFunction(Tabulator):

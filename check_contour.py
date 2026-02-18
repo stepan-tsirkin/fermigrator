@@ -7,6 +7,7 @@ ray.init()
 system = System_PythTB(Haldane_ptb())
 get_contours_and_WFs(system=system,
                      grid=50,
+                     recalculate_E_if_exists=False,
                      save_dir="contours",
                      Efermi_list=[2.4],
                      )

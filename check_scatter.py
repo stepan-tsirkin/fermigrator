@@ -36,34 +36,62 @@ except FileNotFoundError as e:
     chk = w90data.chk
 
 
-print(system.wannier_centers_red)
-positions = np.load(f"{path_system}/positions.npz", allow_pickle=True)
 
-path, bands = system.get_bandstructure()
-bands.plot_path_fat(
-    path, save_file=f"{path_scatter}/bands.png", show_fig=False, close_fig=True)
-
-get_contours_and_WFs(system=system,
-                     grid=50,
-                     recalculate_E_if_exists=False,
-                     save_dir=path_scatter,
-                     Efermi_list=[2.4],
-                     )
+# path, bands = system.get_bandstructure()
+# bands.plot_path_fat(
+#     path, save_file=f"{path_scatter}/bands.png", show_fig=False, close_fig=True)
 
 
+# get_contours_and_WFs(system=system,
+#                      grid=50,
+#                      recalculate_E_if_exists=False,
+#                      save_dir=path_scatter,
+#                      Efermi_list=[2.4],
+#                      )
+
+
+file_scatter_matrix = f"{path_scatter}/scatter_RR.npz"
 try:
-    scatter = ScatteringMatrix.from_npz(f"{seed}.scatter_RR.npz")
+    scatter = ScatteringMatrix.from_npz(file_scatter_matrix)
 except FileNotFoundError as e:
     print(
-        f"Scattering matrix file not found at {seed}.scatter_RR.npz: {e}. Creating scattering matrix from Vkkmn and saving to file.")
+        f"Scattering matrix file not found at {file_scatter_matrix}: {e}. Creating scattering matrix from Vkkmn and saving to file.")
     scatter = ScatteringMatrix(
         center_red=[0, 0, 0],
         gauge="wannier",
         Vkkmn=Vkkmn)
     scatter.set_RR(chk)
-    scatter.to_npz(seed + ".scatter_RR.npz")
+    scatter.to_npz(file_scatter_matrix)
+
+lamb, W = scatter.multipole_decomposition_RR()
+srt = np.argsort(abs(lamb))
+
+
+nR, nW = W.shape[1], W.shape[2]
+W = W[srt].reshape(W.shape[0], -1)
+lamb = lamb[srt]
+
+
+from matplotlib import pyplot as plt
+plt.plot(lamb, "o")
+# plt.yscale("log")
+plt.xlabel("multipole index")
+plt.ylabel("multipole strength")
+# plt.ylim(-1, 10)
+plt.title("Multipole decomposition of scattering matrix")
+plt.savefig(f"{path_scatter}/multipole_decomposition.png")
+plt.close()
+for i in range(len(lamb)):
+    W_loc = abs(W[i].reshape(nR, nW))**2
+    plt.imshow(np.log(W_loc), origin="lower")
+    plt.colorbar()
+    plt.title(f"Multipole {i} with strength {lamb[-i]:.2e}")
+    plt.savefig(f"{path_scatter}/multipole_{i}.png")
+    # logscale of the colorbar
+    plt.close()
+
 
 
 for f1 in glob.glob(f"{path_scatter}/contour*.npz"):
     for f2 in glob.glob(f"{path_scatter}/contour*.npz"):
-        scatter.get_on_contours(f1, f2, save=True)
+        scatter.get_on_contours(f1, f2, save=True, path=path_scatter)

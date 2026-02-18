@@ -47,7 +47,7 @@ class ScatteringMatrix:
 
     def as_dict(self):
         dict = {}
-        for key in ["center_red", "gauge", "num_kpts", "num_bands", "num_wann", "Vkkmn", "Vabrr"]:
+        for key in ["center_red", "gauge", "num_kpts", "num_bands", "num_wann", "Vkkmn", "Vrrab"]:
             if hasattr(self, key):
                 if getattr(self, key) is not None:
                     dict[key] = getattr(self, key)
@@ -65,7 +65,7 @@ class ScatteringMatrix:
     @classmethod
     def from_dict(cls, dict):
         self = cls.__new__(cls)
-        for key in ["center_red", "gauge", "num_kpts", "num_bands", "num_wann", "Vkkmn", "Vabrr"]:
+        for key in ["center_red", "gauge", "num_kpts", "num_bands", "num_wann", "Vkkmn", "Vrrab"]:
             if key in dict:
                 setattr(self, key, dict[key])
         if "iRvec" in dict:
@@ -134,11 +134,8 @@ class ScatteringMatrix:
         rvectors.set_fft_q_to_R(kpt_red=chk.kpt_red)
 
         self.rvec = rvectors
-        print(f"shape of Vkkmn: {self.Vkkmn.shape}")
         Vabcrr = rvectors.qq_to_RR(self.Vkkmn[:, :, :, :, None])
-        print(f"shape of Vabcrr: {Vabcrr.shape}")
-        # self.Vabrr = rvectors.qq_to_RR(self.Vkkmn[:,:,:,:,None])[:,:,:,:,0]
-        self.Vabrr = Vabcrr[:, :, 0, :, :].transpose(2, 3, 0, 1)
+        self.Vrrab = Vabcrr[:, :, 0, :, :].transpose(2, 3, 0, 1)
 
         if forget_kk:
             self.Vkkmn = None
@@ -156,7 +153,7 @@ class ScatteringMatrix:
         exp_right = np.exp(-2j * np.pi *
                            cached_einsum('Ri,kj->Rk', rvectors, kpt_red_right))
         Vkkab = cached_einsum('Rk, Rrab, rq->kqab',
-                              exp_left, self.Vabrr, exp_right)
+                              exp_left, self.Vrrab, exp_right)
         assert (u_left is None) == (
             u_right is None), "u_left and u_right must be both None or both not None"
         if u_left is not None:
@@ -188,3 +185,10 @@ class ScatteringMatrix:
             np.savez(
                 f"{path1}/Vkk_{f1[8:-4]}_{f2[8:-4]}.npz", Vkk=V_on_contours)
         return V_on_contours
+
+
+    def multipole_decomposition_RR(self):
+        assert self.Vrrab is not None, "Vrrab is not set, please set it first using set_RR"
+        Vrarb = self.Vrrab.transpose(0, 2, 1, 3).reshape(self.rvec.nRvec*self.num_wann, self.rvec.nRvec*self.num_wann)
+        e,v = np.linalg.eigh(Vrarb)
+        return e, v.T.reshape( (-1, self.rvec.nRvec, self.num_wann) )

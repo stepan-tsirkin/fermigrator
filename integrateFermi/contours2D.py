@@ -48,8 +48,6 @@ def get_segments(energy_grid, shifts, below_EF, gradient=False):
     weight = weight / (2*NK1*NK2)
     if not gradient:
         return k_center, weight
-    print("k_center.shape=", k_center.shape)
-    print("weight.shape=", weight.shape)
 
     def cyclic_sum(arr1, arr2):
         return sum(arr1[:, i] * (arr2[:, (i+1) % 3] - arr2[:, (i+2) % 3]) for i in range(3))
@@ -58,7 +56,6 @@ def get_segments(energy_grid, shifts, below_EF, gradient=False):
                      -cyclic_sum(E_triangles, k_triangles[0])]) / denominator[None, :]
     # because we flipped the sign of the energy for two_below_EF, we flip it again
     grad[:, -num_two_below_EF:] *= -1
-    print("grad.shape=", grad.shape)
     return k_center, weight, grad
 
 

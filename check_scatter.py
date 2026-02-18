@@ -6,8 +6,9 @@ from wannierberri.w90files import Wannier90data, CheckPoint
 from wannierberri.system import System_w90, System_R
 from integrateFermi.contours2D import get_contours_and_WFs
 
+
 import ray
-# ray.init()
+# ray.init()  # uncomment for parallel execution
 
 path = "wannierberri"
 seed = "wse2"
@@ -23,13 +24,14 @@ try:
     system = System_R.from_npz(f"{path_system}")
     chk = CheckPoint.from_npz(f"{seed_w90data}.chk.npz")
 except FileNotFoundError as e:
-    print (f"System file not found at {path_system}: {e}. Creating system from w90data and saving to file.")
+    print(
+        f"System file not found at {path_system}: {e}. Creating system from w90data and saving to file.")
     w90data = Wannier90data.from_npz(seed_w90data,
                                      files=["chk", "eig", "symmetrizer"])
     system = System_w90(w90data=w90data, periodic=(True, True, False))
     system.symmetrize2(w90data.symmetrizer)
-    system.positions = [[1/3,2/3,-0.7], [1/3,2/3,0.7], [0,0,0]]
-    system.atom_labels = [1,1,2]
+    system.positions = [[1/3, 2/3, -0.7], [1/3, 2/3, 0.7], [0, 0, 0]]
+    system.atom_labels = [1, 1, 2]
     system.save_npz(f"{path_system}")
     chk = w90data.chk
 
@@ -37,11 +39,11 @@ except FileNotFoundError as e:
 print(system.wannier_centers_red)
 positions = np.load(f"{path_system}/positions.npz", allow_pickle=True)
 
-path, bands=system.get_bandstructure()
-bands.plot_path_fat(path, save_file=f"{path_scatter}/bands.png", show_fig=False, close_fig=True)
+path, bands = system.get_bandstructure()
+bands.plot_path_fat(
+    path, save_file=f"{path_scatter}/bands.png", show_fig=False, close_fig=True)
 
-if False:  # uncomment for the first run to get the contours and wavefunctions on the contours
-    get_contours_and_WFs(system=system,
+get_contours_and_WFs(system=system,
                      grid=50,
                      recalculate_E_if_exists=False,
                      save_dir=path_scatter,
@@ -49,14 +51,15 @@ if False:  # uncomment for the first run to get the contours and wavefunctions o
                      )
 
 
-try :
+try:
     scatter = ScatteringMatrix.from_npz(f"{seed}.scatter_RR.npz")
 except FileNotFoundError as e:
-    print (f"Scattering matrix file not found at {seed}.scatter_RR.npz: {e}. Creating scattering matrix from Vkkmn and saving to file.")
+    print(
+        f"Scattering matrix file not found at {seed}.scatter_RR.npz: {e}. Creating scattering matrix from Vkkmn and saving to file.")
     scatter = ScatteringMatrix(
-            center_red=[0,0,0],
-            gauge="wannier",
-            Vkkmn=Vkkmn)
+        center_red=[0, 0, 0],
+        gauge="wannier",
+        Vkkmn=Vkkmn)
     scatter.set_RR(chk)
     scatter.to_npz(seed + ".scatter_RR.npz")
 

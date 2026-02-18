@@ -1,3 +1,4 @@
+import os
 import numpy as np
 from wannierberri.utility import cached_einsum
 
@@ -41,23 +42,24 @@ class ScatteringMatrix:
 
     def as_dict(self):
         dict = {}
-        for key in ["center_red", "gauge", "num_kpts", "num_bands", "num_wann", "Vkkmn", "Vabrr",
-                    "real_lattice"]:
+        for key in ["center_red", "gauge", "num_kpts", "num_bands", "num_wann", "Vkkmn", "Vabrr"]:
             if hasattr(self, key):
                 if getattr(self, key) is not None:
                     dict[key] = getattr(self, key)
         if hasattr(self, "rvec") and self.rvec is not None:
             dict["iRvec"] = self.rvec.iRvec
             dict["wannier_center_red"] = self.rvec.shifts_left_red
+            dict["real_lattice"] = self.rvec.lattice
         return dict
     
     def to_npz(self, filename):
         print (f"saving scattering matrix to {filename} with keys {list(self.as_dict().keys())}")
         np.savez(filename, **self.as_dict())
 
-    def from_dict(self, dict):
-        for key in ["center_red", "gauge", "num_kpts", "num_bands", "num_wann", "Vkkmn", "Vabrr",
-                    "real_lattice"]:
+    @classmethod
+    def from_dict(cls, dict):
+        self = cls.__new__(cls)
+        for key in ["center_red", "gauge", "num_kpts", "num_bands", "num_wann", "Vkkmn", "Vabrr"]:
             if key in dict:
                 setattr(self, key, dict[key])
         if "iRvec" in dict:
@@ -67,15 +69,17 @@ class ScatteringMatrix:
                 wannier_centers_red = np.zeros((self.num_wann, 3), dtype=float)
             self.rvec = Rvectors(
                 iRvec=dict["iRvec"],
-                lattice=self.real_lattice,
+                lattice=dict["real_lattice"],
                 shifts_left_red=[self.center_red],
                 shifts_right_red=wannier_centers_red,
                 
             )
+        return self
     
-    def from_npz(self, filename):
+    @classmethod
+    def from_npz(cls, filename):
         dict = np.load(filename)
-        self.from_dict(dict)
+        return cls.from_dict(dict)
             
     
     def to_wannier_gauge(self, chk):
@@ -120,10 +124,51 @@ class ScatteringMatrix:
         rvectors.set_fft_q_to_R(kpt_red=chk.kpt_red)
 
         self.rvec = rvectors
-        self.Vabrr = rvectors.qq_to_RR(self.Vkkmn[:,:,:,:,None])[:,:,:,:,0]
+        print (f"shape of Vkkmn: {self.Vkkmn.shape}")
+        Vabcrr = rvectors.qq_to_RR(self.Vkkmn[:,:,:,:,None])
+        print (f"shape of Vabcrr: {Vabcrr.shape}")
+        # self.Vabrr = rvectors.qq_to_RR(self.Vkkmn[:,:,:,:,None])[:,:,:,:,0]
+        self.Vabrr = Vabcrr[:,:,0,:,:].transpose(2,3,0,1)
         
         if forget_kk:
             self.Vkkmn = None
             self.num_kpts = None
-        
 
+    def get_on_kpoints(self, 
+                       kpt_red_left, 
+                       kpt_red_right,
+                       u_left=None,
+                       u_right=None,
+                       ):
+        rvectors = self.rvec.iRvec
+        exp_left = np.exp(2j * np.pi * cached_einsum('Ri,kj->Rk', rvectors, kpt_red_left))
+        exp_right = np.exp(-2j * np.pi * cached_einsum('Ri,kj->Rk', rvectors, kpt_red_right))
+        Vkkab = cached_einsum('Rk, Rrab, rq->kqab', exp_left, self.Vabrr, exp_right)
+        assert (u_left is None) == (u_right is None), "u_left and u_right must be both None or both not None"
+        if u_left is not None:
+            # TODO - is we combine with the previous - will it be faster?
+            return cached_einsum('ka,kqab,qb->kq', u_left.conj(), Vkkab, u_right)
+        else:
+            return Vkkab
+
+    def get_on_contours(self, file1, file2,
+                        save=True,
+                        path=None):
+        with np.load(file1) as f1:
+            kpoints1 = f1["kpoints"]
+            wavefunctions1 = f1["wavefunctions"]
+        
+        with np.load(file2) as f2:
+            kpoints2 = f2["kpoints"]
+            wavefunctions2 = f2["wavefunctions"]
+        V_on_contours = self.get_on_kpoints(kpt_red_left=kpoints1, kpt_red_right=kpoints2, 
+                                            u_left=wavefunctions1, u_right=wavefunctions2)
+        if save:
+            path1, f1 = os.path.split(file1)
+            path2, f2 = os.path.split(file2)
+            if path is not None:
+                path1 = path
+                if path2 != path1:
+                    Warning(f"Warning: the two files are in different directories ({path1} and {path2}), but the output will be saved to {path1}")
+            np.savez(f"{path1}/Vkk_{f1[8:-4]}_{f2[8:-4]}.npz", Vkk=V_on_contours)
+        return V_on_contours

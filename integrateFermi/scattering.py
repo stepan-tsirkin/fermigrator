@@ -155,7 +155,7 @@ class ScatteringMatrix:
         rvectors = self.rvec.iRvec
         exp_left = np.exp(
             2j * np.pi * cached_einsum('Ri,kj->Rk', rvectors, kpt_red_left))
-        exp_right = np.exp(-2j * np.pi *
+        exp_right = np.exp( -2j * np.pi *
                            cached_einsum('Ri,kj->Rk', rvectors, kpt_red_right))
         Vkkab = cached_einsum('Rk, Rrab, rq->kqab',
                               exp_left, self.Vrrab, exp_right)
@@ -167,7 +167,7 @@ class ScatteringMatrix:
         else:
             return Vkkab
 
-    def get_on_contours(self, file1, file2,
+    def get_Vkk_on_contours(self, file1, file2,
                         save=True,
                         path=None):
         with np.load(file1) as f1:
@@ -191,25 +191,15 @@ class ScatteringMatrix:
                 f"{path1}/Vkk_{f1[8:-4]}_{f2[8:-4]}.npz", Vkk=V_on_contours)
         return V_on_contours
     
-    def get_on_contours_all(self, path, Efermi_list=None):
-        file_list = glob.glob(os.path.join(path, "contour_ib*_EF=*.npz"))
-        Efermi_list_files = [float(f.split("_EF=")[1].split(".npz")[0]) for f in file_list]
-        if Efermi_list is not None:
-            select_files = np.zeros(len(file_list), dtype=bool)
-            for Ef in Efermi_list:
-                idx = np.where(np.isclose(Efermi_list_files, Ef, atol=1e-5))[0]
-                if np.abs(Efermi_list_files[idx] - Ef) > 1e-5:
-                    Warning(f"Warning: no file found for Efermi={Ef}, closest file has Efermi={Efermi_list_files[idx]}, which is different by {Efermi_list_files[idx] - Ef}")
-                else:
-                    print(f"Selected file {file_list[idx]} for Efermi={Ef}")
-                select_files[idx] = True
-            file_list = np.array(file_list)[select_files]
-            Efermi_list_files = np.array(Efermi_list_files)[select_files]
-        for f1, ef1 in zip(file_list, Efermi_list_files):
-            for f2, ef2 in zip(file_list, Efermi_list_files):
-                if abs(ef1 - ef2) < 1e-5:
-                    print (f"Calculating scattering matrix on contours for Efermi={ef1} using files {f1} and {f2}")
-                    self.get_on_contours(f1, f2, save=True, path=path)
+    def get_Vkk_on_contours_all(self, path, Efermi_list=None):
+        if Efermi_list is None:
+            Efermi_list = get_all_Fermi_levels(path)
+        for Efermi in Efermi_list:
+            file_list = get_contour_files_Efermi(path, Efermi)
+            for f1 in file_list:
+                for f2 in file_list:
+                    print (f"Calculating scattering matrix on contours for Efermi={Efermi} using files {f1} and {f2}")
+                    self.get_Vkk_on_contours(f1, f2, save=True, path=path)
 
     @property
     def multipole_eigenvalues(self):
@@ -322,3 +312,86 @@ class ScatteringMatrix:
                     lw += x
             linewidths[ib1] = lw
         return linewidths, kpoints    
+
+
+
+
+def get_EF_from_filename(filename):
+    return float(os.path.basename(filename).split("_EF=")[1].split(".npz")[0])
+
+def get_ib_from_filename(filename):
+    return int(os.path.basename(filename).split("_ib")[1].split("_")[0])
+
+def get_all_Fermi_levels(path):
+    file_list = glob.glob(os.path.join(path, "contour_ib*_EF=*.npz"))
+    Efermi_list_files = set([get_EF_from_filename(f) for f in file_list])
+    return sorted(Efermi_list_files)
+
+def get_contour_files_Efermi(path, Efermi, ib=None):
+    if ib is None:
+        file_list = glob.glob(os.path.join(path, "contour_ib*_EF=*.npz"))
+        Efermi_list_files = [get_EF_from_filename(f) for f in file_list]
+        select = np.isclose(Efermi_list_files, Efermi, atol=1e-5)   
+        return np.array(file_list)[select]
+    else:
+        file_list = get_contour_files_Efermi(path, Efermi, ib=None)
+        ib_list = [get_ib_from_filename(f) for f in file_list]
+        select = np.array(ib_list) == ib
+        res = np.array(file_list)[select]
+        assert len(res) <= 1, f"Multiple files found for ib={ib} and Efermi={Efermi}, but expected at most one: {res}"
+        return res
+
+
+
+def get_ib_EF_from_Vkk_filename(filename):
+    base = os.path.basename(filename).split(".npz")[0]
+    ib1 = int(base.split("_")[1][2:])
+    ib2 = int(base.split("_")[3][2:])
+    Efermi1 = float(base.split("_")[2][3:])
+    Efermi2 = float(base.split("_")[4][3:])
+    return ib1, ib2, Efermi1, Efermi2
+
+def get_Vkk_files_Efermi(path, Efermi):
+    file_list_0 = glob.glob(os.path.join(path, "Vkk_ib*_EF=*_ib*_EF=*.npz".format(Efermi, Efermi)))
+    file_dict={}
+    for f in file_list_0:
+        ib1, ib2, Efermi1, Efermi2 = get_ib_EF_from_Vkk_filename(f)
+        if np.allclose([Efermi1, Efermi2], Efermi, atol=1e-5):
+            file_dict[(ib1, ib2)] = f
+    return file_dict
+
+def get_Vkk_file(ib1, ib2, Efermi, path):
+    file_list = get_Vkk_files_Efermi(path, Efermi)
+    for f in file_list:
+        ib1_f, ib2_f, Efermi1_f, Efermi2_f = get_ib_EF_from_Vkk_filename(f)
+        if ib1_f == ib1 and ib2_f == ib2:
+            return f
+
+def get_linewidth_Efermi(path, Efermi):
+    files_contour = get_contour_files_Efermi(path, Efermi)
+    files_Vkk_dict = get_Vkk_files_Efermi(path, Efermi)
+    contour_dict = {get_ib_from_filename(f): f for f in files_contour}
+    linewidth_dict = {}
+    for ib, file_contour in contour_dict.items():
+        contour1 = np.load(file_contour)
+        linewidth_dict[ib] = np.zeros(contour1["kpoints"].shape[0], dtype=float)
+        for ib2 in contour_dict.keys():
+            contour2 = np.load(contour_dict[ib2])
+            if (ib, ib2) not in files_Vkk_dict:
+                Warning(f"Warning: no Vkk file found for ib1={ib}, ib2={ib2} and Efermi={Efermi}, skipping this pair")
+                continue
+            else:
+                file_Vkk = np.load(files_Vkk_dict[(ib, ib2)])
+            if (ib2, ib) not in files_Vkk_dict:
+                Warning(f"Warning: no Vkk file found for ib1={ib2}, ib2={ib} and Efermi={Efermi}, skipping this pair")
+                continue
+            else:
+                file_Vkk_conj = np.load(files_Vkk_dict[(ib2, ib)])
+            assert np.allclose(file_Vkk["Vkk"], file_Vkk_conj["Vkk"].conj().T), f"Warning: Vkk file for ib1={ib}, ib2={ib2} and Efermi={Efermi} is not the conjugate transpose of the Vkk file for ib1={ib2}, ib2={ib} and Efermi={Efermi}, skipping this pair"
+            linewidth = cached_einsum('kq, q, qk -> k', file_Vkk["Vkk"], contour2["weights"], file_Vkk_conj["Vkk"])
+            assert np.all(abs(linewidth.imag) < 1e-5), f"Warning: linewidth has significant imaginary part for ib1={ib}, ib2={ib2} and Efermi={Efermi}, but expected to be real, skipping this pair"
+            np.savez(os.path.join(path, f"linewidth_ib{ib}_ib{ib2}_EF={Efermi:.5f}.npz"), 
+                    linewidth=linewidth, kpoints=contour1["kpoints"], weights=contour1["weights"])
+            
+            linewidth_dict[ib] += np.real(linewidth)
+    return linewidth_dict

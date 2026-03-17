@@ -2,7 +2,7 @@ import os
 import numpy as np
 from wannierberri.grid import Grid
 from wannierberri.calculators.tabulate import TabulatorAll
-from wannierberri.run import run
+from wannierberri import run
 from .get_band_wavefunction import get_wavefunction_on_kpoints
 
 

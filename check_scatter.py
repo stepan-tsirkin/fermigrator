@@ -72,26 +72,40 @@ W = W[srt].reshape(W.shape[0], -1)
 lamb = lamb[srt]
 
 
+# from matplotlib import pyplot as plt
+# plt.plot(lamb, "o")
+# # plt.yscale("log")
+# plt.xlabel("multipole index")
+# plt.ylabel("multipole strength")
+# # plt.ylim(-1, 10)
+# plt.title("Multipole decomposition of scattering matrix")
+# plt.savefig(f"{path_scatter}/multipole_decomposition.png")
+# plt.close()
+# for i in range(len(lamb)):
+#     W_loc = abs(W[i].reshape(nR, nW))**2
+#     plt.imshow(np.log(W_loc), origin="lower")
+#     plt.colorbar()
+#     plt.title(f"Multipole {i} with strength {lamb[-i]:.2e}")
+#     plt.savefig(f"{path_scatter}/multipole_{i}.png")
+#     # logscale of the colorbar
+#     plt.close()
+
+
+
+# for f1 in glob.glob(f"{path_scatter}/contour*.npz"):
+#     for f2 in glob.glob(f"{path_scatter}/contour*.npz"):
+#         scatter.get_on_contours(f1, f2, save=True, path=path_scatter)
+
+
+
+lw_direct, kp_direct = scatter.get_linewidth_direct(Efermi=2.4, path=path_scatter)
+lw_multipole, kp_multipole = scatter.get_linewidth_multipole(Efermi=2.4, path=path_scatter)
+
 from matplotlib import pyplot as plt
-plt.plot(lamb, "o")
-# plt.yscale("log")
-plt.xlabel("multipole index")
-plt.ylabel("multipole strength")
-# plt.ylim(-1, 10)
-plt.title("Multipole decomposition of scattering matrix")
-plt.savefig(f"{path_scatter}/multipole_decomposition.png")
-plt.close()
-for i in range(len(lamb)):
-    W_loc = abs(W[i].reshape(nR, nW))**2
-    plt.imshow(np.log(W_loc), origin="lower")
-    plt.colorbar()
-    plt.title(f"Multipole {i} with strength {lamb[-i]:.2e}")
-    plt.savefig(f"{path_scatter}/multipole_{i}.png")
-    # logscale of the colorbar
-    plt.close()
-
-
-
-for f1 in glob.glob(f"{path_scatter}/contour*.npz"):
-    for f2 in glob.glob(f"{path_scatter}/contour*.npz"):
-        scatter.get_on_contours(f1, f2, save=True, path=path_scatter)
+for i in lw_direct.keys():
+    fig, ax = plt.subplots(2, 1, sharex=True)
+    ax[0].plot(kp_direct[i][:, 0], kp_direct[i][:, 1], "o", s=lw_direct[i]*100, label="direct")
+    ax[1].plot(kp_multipole[i][:, 0], kp_multipole[i][:, 1], "o", s=lw_multipole[i]*100, label="multipole")
+    ax[0].set_title(f"Linewidth direct for band {i}")
+    ax[1].set_title(f"Linewidth multipole for band {i}")
+    plt.savefig(f"{path_scatter}/linewidth_comparison_band_{i}.png")

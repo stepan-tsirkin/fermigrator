@@ -1,8 +1,19 @@
 import numpy as np
 
-from integrateFermi.scattering import get_contour_files_Efermi, get_linewidth_Efermi, get_all_Fermi_levels
+from integrateFermi.scattering import (get_contour_files_Efermi, 
+                                       get_all_Fermi_levels
+)
 from matplotlib import pyplot as plt
 from wannierberri import System_R
+
+
+method = "multipole"  # "direct" or "multipole"
+
+if method == "direct":
+    from integrateFermi.scattering import get_linewidth_Efermi as get_linewidths
+elif method == "multipole":
+    from integrateFermi.scattering import get_linewidth_multipole_Efermi as get_linewidths
+
 
 path = "contours"
 system = System_R.from_npz("system")
@@ -11,7 +22,7 @@ recip_lattice = system.recip_lattice[:2, :2]
 
 linewidth_dict = {}
 for Efermi in get_all_Fermi_levels(path):
-    linewidth_dict[Efermi] = get_linewidth_Efermi(path, Efermi)
+    linewidth_dict[Efermi] = get_linewidths(path, Efermi)
 
 nfermi = len(linewidth_dict)
 ncols = 4
@@ -42,7 +53,7 @@ for i, Efermi in enumerate(sorted(linewidth_dict.keys())):
 for j in range(i+1, nrows*ncols):
     fig.delaxes(axes[j//ncols, j%ncols])
     
-plt.savefig("linewidths.png")
+plt.savefig(f"linewidths-{method}.png")
 plt.close()
 x = []
 y = []
@@ -54,5 +65,5 @@ for i, Efermi in enumerate(sorted(linewidth_dict.keys())):
 plt.plot(x, y, "o-")
 plt.xlabel("Fermi energy")
 plt.ylabel("Average linewidth")
-plt.savefig("linewidth_vs_Efermi.png")
+plt.savefig(f"linewidth_vs_Efermi-{method}.png")
 plt.close()

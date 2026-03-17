@@ -20,11 +20,9 @@ class ScatteringMatrix:
         self.rvec = rvec
         if Vrrab is not None:
             self.Vrrab = Vrrab
-            self.num_wann = Vrrab.shape[2]
             assert Vrrab.shape == (rvec.nRvec, rvec.nRvec, self.num_wann, self.num_wann), f"Vrrab should have shape (nRvec, nRvec, num_wann, num_wann), but got {Vrrab.shape}"
         elif num_wann is not None:
             self.Vrrab = np.zeros((rvec.nRvec, rvec.nRvec, num_wann, num_wann), dtype=complex)
-            self.num_wann = num_wann
         else:
             raise ValueError("Either Vrrab or num_wann should be provided")
 
@@ -145,6 +143,9 @@ class ScatteringMatrix:
         dict = np.load(filename)
         return cls.from_dict(dict)
 
+    @property
+    def num_wann(self):
+        return self.Vrrab.shape[2]
 
     def get_on_kpoints(self,
                        kpt_red_left,
@@ -230,7 +231,7 @@ class ScatteringMatrix:
         return self._multipole_eigenvalues, self._multipole_eigenvectors
     
 
-    def get_multipole_on_contours(self, file,
+    def get_multipole_on_contour(self, file,
                         save=True,
                         path=None):
         with np.load(file) as f:
@@ -239,11 +240,12 @@ class ScatteringMatrix:
             weight = f["weights"]
         
         v = self.multipole_eigenvectors
+        l = self.multipole_eigenvalues
         
         exp = np.exp(-2j * np.pi * cached_einsum('Ri,kj->Rk', self.rvec.iRvec, kpoints))
         W = cached_einsum('lRa, Rk, ka -> lk', v, exp, wavefunctions)
-        vertex = cached_einsum('lk, k, mk -> lm', W.conj(), weight, W)
-        projector = cached_einsum('lk, mk -> lm', W.conj(), W)
+        vertex = cached_einsum('lk, k, mk , m-> lm', W.conj(), weight, W, l)
+        projector = cached_einsum('lk, mk, m -> klm', W.conj(), W, l)
         if save:
             path1, f1 = os.path.split(file)
             if path is None:
@@ -251,69 +253,19 @@ class ScatteringMatrix:
             np.savez(
                 f"{path1}/multipole_vertex_{f1[8:-4]}.npz", vertex=vertex, projector=projector, kpoints=kpoints)
         return vertex, projector
+    
+    def get_multipole_on_contours_all(self, path, Efermi_list=None):
+        if Efermi_list is None:
+            Efermi_list = get_all_Fermi_levels(path)
+        for Efermi in Efermi_list:
+            file_list = get_contour_files_Efermi(path, Efermi)
+            for f in file_list:
+                print (f"Calculating multipole vertex on contour for Efermi={Efermi} using file {f}")
+                self.get_multipole_on_contour(f, save=True, path=path)
             
 
-    def get_linewidth_multipole(self,path, Efermi):
-        linewidths = {}
-        kpoints = {}
-        file_dict = {}
-        for f in glob.glob(os.path.join(path, "multipole_vertex_*.npz")):
-            Ef = float(os.path.basename(f).split("_")[2])
-            print(f"Found file {f} with Efermi={Ef}")
-            if Ef == Efermi:
-                ib = int(os.path.basename(f).split("_")[3][:-4])
-                if ib in file_dict:
-                    Warning(f"Warning: multiple files found for ib={ib} and Efermi={Efermi}, using the first one found: {file_dict[ib]}")
-                else:
-                    file_dict[ib] = np.load(f)
-        for ib, f in file_dict.items():
-            lw = np.zeros(f["kpoints"].shape[0], dtype=float)
-            projector = f["projector"]
-            for f2 in file_dict.values():
-                vertex = f2["vertex"]
-                lw += np.real(np.diag(cached_einsum('klm, ml, l -> k', vertex, projector, self.multipole_eigenvalues)))
-            linewidths[ib] = lw
-            kpoints[ib] = f["kpoints"]
-        return linewidths, kpoints
-    
-    def get_linewidth_direct(self, path, Efermi):
-        linewidths = {}
-        file_dict = {}
-        kpoints = {}
-        weights = {}
-        for f in glob.glob(os.path.join(path, "Vkk_*.npz")):
-            Ef1 = float(os.path.basename(f).split("_")[2][3:10])
-            Ef2 = float(os.path.basename(f).split("_")[4][3:10])
-            print(f"Found file {f} with Efermi1={Ef1} and Efermi2={Ef2}")
-            if Ef1 == Efermi and Ef2 == Efermi:
-                ib1 = int(os.path.basename(f).split("_")[1][2:])
-                ib2 = int(os.path.basename(f).split("_")[3][2:])
-                print (f"Selected file {f} for ib1={ib1}, ib2={ib2} and Efermi={Efermi}")
-                if (ib1, ib2) in file_dict:
-                    Warning(f"Warning: multiple files found for ib1={ib1}, ib2={ib2} and Efermi={Efermi}, using the first one found: {file_dict[(ib1, ib2)]}")
-                else:
-                    file_dict[(ib1, ib2)] = np.load(f)
-                if ib1 not in kpoints:
-                    file_kp = np.load(os.path.join(path, f"contour_ib{ib1}_EF={Efermi:.5f}.npz"))
-                    kpoints[ib1] = file_kp["kpoints"]
-                    weights[ib1] = file_kp["weights"]
-                if ib2 not in kpoints:
-                    file_kp = np.load(os.path.join(path, f"contour_ib{ib2}_EF={Efermi:.5f}.npz"))
-                    kpoints[ib2] = file_kp["kpoints"]
-                    weights[ib2] = file_kp["weights"]
-        linewidths = {}
-        for ib1 in kpoints.keys():
-            lw = np.zeros(kpoints[ib1].shape[0], dtype=float)
-            for ib2 in kpoints.keys():
-                if (ib1, ib2) in file_dict:
-                    Vkk = file_dict[(ib1, ib2)]["Vkk"]
-                    x = np.real(cached_einsum('kq, q, qk -> k', Vkk, weights[ib2], Vkk.conj()))
-                    print (f"{Vkk.shape=}, {weights[ib2].shape=},{lw.shape=}, {x.shape=}")
-                    lw += x
-            linewidths[ib1] = lw
-        return linewidths, kpoints    
-
-
+ 
+      
 
 
 def get_EF_from_filename(filename):
@@ -366,6 +318,22 @@ def get_Vkk_file(ib1, ib2, Efermi, path):
         ib1_f, ib2_f, Efermi1_f, Efermi2_f = get_ib_EF_from_Vkk_filename(f)
         if ib1_f == ib1 and ib2_f == ib2:
             return f
+        
+
+def get_vertices_files_Efermi(path, Efermi):
+    file_list_0 = glob.glob(os.path.join(path, "multipole_vertex_ib*_EF=*.npz".format(Efermi)))
+    file_dict={}
+    for f in file_list_0:
+        base = os.path.basename(f).split(".npz")[0]
+        ib = int(base.split("_")[2][2:])
+        Efermi_f = float(base.split("_")[3][3:])
+        if np.isclose(Efermi_f, Efermi, atol=1e-5):
+            file_dict[ib] = f
+    return file_dict
+
+def get_vertix_file(ib, Efermi, path):
+    file_list = get_vertices_files_Efermi(path, Efermi)
+    return file_list[ib]
 
 def get_linewidth_Efermi(path, Efermi):
     files_contour = get_contour_files_Efermi(path, Efermi)
@@ -395,3 +363,24 @@ def get_linewidth_Efermi(path, Efermi):
             
             linewidth_dict[ib] += np.real(linewidth)
     return linewidth_dict
+
+
+def get_linewidth_multipole_Efermi(path, Efermi):
+    linewidths_dict = {}
+    files_contour = get_contour_files_Efermi(path, Efermi)
+    files_vertices_dict = get_vertices_files_Efermi(path, Efermi)
+    for file_contour in files_contour:
+        ib = get_ib_from_filename(file_contour)
+        contour = np.load(file_contour)
+        linewidths_dict[ib] = np.zeros(contour["kpoints"].shape[0], dtype=float)
+        vertex_file = get_vertix_file(ib, Efermi, path)
+        projector = np.load(vertex_file)["projector"]
+        for jb, vertex2 in files_vertices_dict.items():
+            vertex = np.load(vertex2)["vertex"]
+            print (f"{vertex.shape=}, {projector.shape=}")
+            linewidths = cached_einsum('klm, ml -> k', projector, vertex)
+            linewidths_dict[ib] += np.real(linewidths)
+            np.savez(os.path.join(path, f"linewidth_multipole_ib{ib}_ib{jb}_EF={Efermi:.5f}.npz"),
+                    linewidth=linewidths, kpoints=contour["kpoints"], weights=contour["weights"])
+    return linewidths_dict
+            

@@ -7,7 +7,7 @@ from matplotlib import pyplot as plt
 from wannierberri import System_R
 
 
-method = "multipole"  # "direct" or "multipole"
+method = "direct"  # "direct" or "multipole"
 
 if method == "direct":
     from integrateFermi.scattering import get_linewidth_Efermi as get_linewidths
@@ -55,15 +55,21 @@ for j in range(i+1, nrows*ncols):
     
 plt.savefig(f"linewidths-{method}.png")
 plt.close()
-x = []
-y = []
+
+x=[]
+y=[]
 for i, Efermi in enumerate(sorted(linewidth_dict.keys())):
+    if abs(Efermi) >0.95:
+        continue
     for ib, lw in linewidth_dict[Efermi].items():
         if np.mean(lw) <100000:
             x.append(Efermi)
             y.append(np.mean(lw))
-plt.plot(x, y, "o-")
+    
+plt.plot(x, y, "o")
+plt.plot([0],[0], "v")
 plt.xlabel("Fermi energy")
 plt.ylabel("Average linewidth")
+plt.grid()
 plt.savefig(f"linewidth_vs_Efermi-{method}.png")
 plt.close()

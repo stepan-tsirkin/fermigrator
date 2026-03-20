@@ -3,7 +3,7 @@ import os
 import numpy as np
 from wannierberri.utility import cached_einsum
 from wannierberri.fourier.rvectors import Rvectors
-
+from .database import get_all_Fermi_levels, get_contour_files_Efermi, get_Vkk_files_Efermi, get_vertices_files_Efermi, get_vertix_file
 
 # from .rvectors import RvectorsRR
 
@@ -264,78 +264,7 @@ class ScatteringMatrix:
                 self.get_multipole_on_contour(f, save=True, path=path)
             
 
- 
-      
-
-
-def get_EF_from_filename(filename):
-    return float(os.path.basename(filename).split("_EF=")[1].split(".npz")[0])
-
-def get_ib_from_filename(filename):
-    return int(os.path.basename(filename).split("_ib")[1].split("_")[0])
-
-def get_all_Fermi_levels(path):
-    file_list = glob.glob(os.path.join(path, "contour_ib*_EF=*.npz"))
-    Efermi_list_files = set([get_EF_from_filename(f) for f in file_list])
-    return sorted(Efermi_list_files)
-
-def get_contour_files_Efermi(path, Efermi, ib=None):
-    if ib is None:
-        file_list = glob.glob(os.path.join(path, "contour_ib*_EF=*.npz"))
-        Efermi_list_files = [get_EF_from_filename(f) for f in file_list]
-        select = np.isclose(Efermi_list_files, Efermi, atol=1e-5)   
-        return np.array(file_list)[select]
-    else:
-        file_list = get_contour_files_Efermi(path, Efermi, ib=None)
-        ib_list = [get_ib_from_filename(f) for f in file_list]
-        select = np.array(ib_list) == ib
-        res = np.array(file_list)[select]
-        assert len(res) <= 1, f"Multiple files found for ib={ib} and Efermi={Efermi}, but expected at most one: {res}"
-        return res
-
-
-
-def get_ib_EF_from_Vkk_filename(filename):
-    base = os.path.basename(filename).split(".npz")[0]
-    ib1 = int(base.split("_")[1][2:])
-    ib2 = int(base.split("_")[3][2:])
-    Efermi1 = float(base.split("_")[2][3:])
-    Efermi2 = float(base.split("_")[4][3:])
-    return ib1, ib2, Efermi1, Efermi2
-
-def get_Vkk_files_Efermi(path, Efermi):
-    file_list_0 = glob.glob(os.path.join(path, "Vkk_ib*_EF=*_ib*_EF=*.npz".format(Efermi, Efermi)))
-    file_dict={}
-    for f in file_list_0:
-        ib1, ib2, Efermi1, Efermi2 = get_ib_EF_from_Vkk_filename(f)
-        if np.allclose([Efermi1, Efermi2], Efermi, atol=1e-5):
-            file_dict[(ib1, ib2)] = f
-    return file_dict
-
-def get_Vkk_file(ib1, ib2, Efermi, path):
-    file_list = get_Vkk_files_Efermi(path, Efermi)
-    for f in file_list:
-        ib1_f, ib2_f, Efermi1_f, Efermi2_f = get_ib_EF_from_Vkk_filename(f)
-        if ib1_f == ib1 and ib2_f == ib2:
-            return f
-        
-
-def get_vertices_files_Efermi(path, Efermi):
-    file_list_0 = glob.glob(os.path.join(path, "multipole_vertex_ib*_EF=*.npz".format(Efermi)))
-    file_dict={}
-    for f in file_list_0:
-        base = os.path.basename(f).split(".npz")[0]
-        ib = int(base.split("_")[2][2:])
-        Efermi_f = float(base.split("_")[3][3:])
-        if np.isclose(Efermi_f, Efermi, atol=1e-5):
-            file_dict[ib] = f
-    return file_dict
-
-def get_vertix_file(ib, Efermi, path):
-    file_list = get_vertices_files_Efermi(path, Efermi)
-    return file_list[ib]
-
-def get_linewidth_Efermi(path, Efermi):
+ def get_linewidth_Efermi(path, Efermi):
     files_contour = get_contour_files_Efermi(path, Efermi)
     files_Vkk_dict = get_Vkk_files_Efermi(path, Efermi)
     contour_dict = {get_ib_from_filename(f): f for f in files_contour}
@@ -384,3 +313,4 @@ def get_linewidth_multipole_Efermi(path, Efermi):
                     linewidth=linewidths, kpoints=contour["kpoints"], weights=contour["weights"])
     return linewidths_dict
             
+      

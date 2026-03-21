@@ -42,6 +42,7 @@ def get_segments(energy_grid, shifts, below_EF, gradient=False):
               * (k_triangles[:, :, i]-k_triangles[:, :, 0])) for i in (1, 2)]
     k_center = (kappa[0] + kappa[1]) / 2
     k_center = k_center.T
+    segments = np.array(kappa).transpose(2, 0, 1)
 
     weight = 2 * (-E_triangles[:, 0]) / ((E_triangles[:, 1] -
                                           E_triangles[:, 0]) * (E_triangles[:, 2]-E_triangles[:, 0]))
@@ -56,7 +57,7 @@ def get_segments(energy_grid, shifts, below_EF, gradient=False):
                      -cyclic_sum(E_triangles, k_triangles[0])]) / denominator[None, :]
     # because we flipped the sign of the energy for two_below_EF, we flip it again
     grad[:, -num_two_below_EF:] *= -1
-    return k_center, weight, grad
+    return k_center, segments, weight, grad
 
 
 def get_kpoints_and_weights_FS(energy_grid, reciprocal_lattice_vectors, fermi_level,
@@ -79,12 +80,13 @@ def get_kpoints_and_weights_FS(energy_grid, reciprocal_lattice_vectors, fermi_le
     res2 = get_segments(
         energy_grid, shifts=shifts[1], below_EF=below_EF, gradient=gradient)
     kpoints = np.vstack([res1[0], res2[0]])
-    weights = np.concatenate([res1[1], res2[1]], axis=0)
+    weights = np.concatenate([res1[2], res2[2]], axis=0)
+    segments = np.concatenate([res1[1], res2[1]], axis=0)
     if not gradient:
         return kpoints, weights
-    grad = np.hstack((res1[2], res2[2]))
+    grad = np.hstack((res1[3], res2[3]))
     grad = np.dot(np.linalg.inv(reciprocal_lattice_vectors), grad)
-    return kpoints, weights, grad.T
+    return kpoints, segments, weights, grad.T
 
 
 def get_contours_and_WFs(system,
@@ -92,6 +94,7 @@ def get_contours_and_WFs(system,
                          Nfermi=101,
                          return_dict=True,
                          grid=None,
+                         get_wf=True,
                          recalculate_E_if_exists=False,
                          save_dir=None,
                          return_empty=False
@@ -139,16 +142,19 @@ def get_contours_and_WFs(system,
     contours = {}
     for ib in range(energies_grid.shape[2]):
         for i, e in enumerate(Efermi_list):
-            kpoints, weights, grad = get_kpoints_and_weights_FS(
+            centers, segments, weights, grad = get_kpoints_and_weights_FS(
                 energies_grid[:, :, ib], rec_lattice, e, gradient=True)
-            if len(kpoints) == 0:
+            if len(centers) == 0:
                 if return_empty:
-                    contours[(ib, e)] = {"kpoints": kpoints, "weights": weights,
+                    contours[(ib, e)] = {"kpoints": centers, "weights": weights,
+                                         "segments" : segments,
                                          "grad": grad, "wavefunctions": np.zeros((0, system.num_wann))}
                 continue
-            wavefunctions = get_wavefunction_on_kpoints(system, kpoints, ib)
-            dic_loc = {"kpoints": kpoints, "weights": weights,
-                       "grad": grad, "wavefunctions": wavefunctions}
+            dic_loc = {"kpoints": centers, "weights": weights,
+                       "grad": grad, "segments": segments}
+            if get_wf:
+                wavefunctions = get_wavefunction_on_kpoints(system, centers, ib)
+                dic_loc["wavefunctions"] = wavefunctions
             if return_dict:
                 contours[(ib, e)] = dic_loc
             if save_dir is not None:

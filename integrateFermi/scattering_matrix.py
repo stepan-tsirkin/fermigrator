@@ -1,11 +1,6 @@
-import glob
-import os
 import numpy as np
 from wannierberri.utility import cached_einsum
 from wannierberri.fourier.rvectors import Rvectors
-from .database import get_all_Fermi_levels, get_contour_files_Efermi, get_Vkk_files_Efermi, get_vertices_files_Efermi, get_vertix_file
-
-# from .rvectors import RvectorsRR
 
 
 class ScatteringMatrix:
@@ -20,14 +15,16 @@ class ScatteringMatrix:
         self.rvec = rvec
         if Vrrab is not None:
             self.Vrrab = Vrrab
-            assert Vrrab.shape == (rvec.nRvec, rvec.nRvec, self.num_wann, self.num_wann), f"Vrrab should have shape (nRvec, nRvec, num_wann, num_wann), but got {Vrrab.shape}"
+            assert Vrrab.shape == (rvec.nRvec, rvec.nRvec, self.num_wann,
+                                   self.num_wann), f"Vrrab should have shape (nRvec, nRvec, num_wann, num_wann), but got {Vrrab.shape}"
         elif num_wann is not None:
-            self.Vrrab = np.zeros((rvec.nRvec, rvec.nRvec, num_wann, num_wann), dtype=complex)
+            self.Vrrab = np.zeros(
+                (rvec.nRvec, rvec.nRvec, num_wann, num_wann), dtype=complex)
         else:
             raise ValueError("Either Vrrab or num_wann should be provided")
 
     @classmethod
-    def from_Vkk(cls, Vkkmn, gauge="wannier", 
+    def from_Vkk(cls, Vkkmn, gauge="wannier",
                  center_red=None,
                  wannier_centers_red=None,
                  real_lattice=None,
@@ -58,7 +55,8 @@ class ScatteringMatrix:
             assert chk.num_kpts == num_kpts, f"Number of k-points in the scattering matrix ({num_kpts}) does not match the number of k-points in the checkpoint ({chk.num_kpts})"
             assert chk.num_bands == num_bands, f"Number of bands in the scattering matrix ({num_bands}) does not match the number of bands in the checkpoint ({chk.num_bands})"
             assert chk.v_matrix is not None, "The checkpoint does not contain the v_matrix, which is needed to transform the scattering matrix to the Wannier gauge"
-            Vkkab_w = np.zeros((num_kpts, num_kpts, num_bands, chk.num_wann), dtype=complex)
+            Vkkab_w = np.zeros(
+                (num_kpts, num_kpts, num_bands, chk.num_wann), dtype=complex)
             for ik in range(num_kpts):
                 Vkkab_w[ik, :, :, :] = cached_einsum(
                     'kij,jb->kib', Vkkmn[:, ik, :, :], chk.v_matrix[ik])
@@ -72,9 +70,11 @@ class ScatteringMatrix:
         num_wann = Vkkab_wan.shape[2]
         if wannier_centers_red is None:
             if chk is None:
-                wannier_centers_red = np.zeros((num_kpts, num_wann, 3), dtype=float)
+                wannier_centers_red = np.zeros(
+                    (num_kpts, num_wann, 3), dtype=float)
             else:
-                wannier_centers_red = chk.wannier_centers_cart @ np.linalg.inv(chk.real_lattice)
+                wannier_centers_red = chk.wannier_centers_cart @ np.linalg.inv(
+                    chk.real_lattice)
         if center_red is None:
             center_red = np.zeros(3, dtype=float)
         if real_lattice is None:
@@ -122,19 +122,21 @@ class ScatteringMatrix:
     @classmethod
     def from_dict(cls, dict):
         self = cls.__new__(cls)
-        for key in ["Vrrab","_multipole_eigenvalues", "_multipole_eigenvectors"]:
+        for key in ["Vrrab", "_multipole_eigenvalues", "_multipole_eigenvectors"]:
             if key in dict:
                 setattr(self, key, dict[key])
                 if key == "Vrrab":
                     num_wann = dict[key].shape[2]
-                else:                    
-                    num_wann = 0 
+                else:
+                    num_wann = 0
         if "iRvec" in dict:
             self.rvec = Rvectors(
                 iRvec=dict["iRvec"],
                 lattice=dict["real_lattice"],
-                shifts_left_red=[dict.get("center_red", np.zeros(3, dtype=float))],
-                shifts_right_red=dict.get("wannier_centers_red", np.zeros((num_wann, 3), dtype=float)),
+                shifts_left_red=[
+                    dict.get("center_red", np.zeros(3, dtype=float))],
+                shifts_right_red=dict.get(
+                    "wannier_centers_red", np.zeros((num_wann, 3), dtype=float)),
             )
         return self
 
@@ -156,7 +158,7 @@ class ScatteringMatrix:
         rvectors = self.rvec.iRvec
         exp_left = np.exp(
             2j * np.pi * cached_einsum('Ri,kj->Rk', rvectors, kpt_red_left))
-        exp_right = np.exp( -2j * np.pi *
+        exp_right = np.exp(-2j * np.pi *
                            cached_einsum('Ri,kj->Rk', rvectors, kpt_red_right))
         Vkkab = cached_einsum('Rk, Rrab, rq->kqab',
                               exp_left, self.Vrrab, exp_right)
@@ -169,45 +171,45 @@ class ScatteringMatrix:
             return Vkkab
 
     def get_Vkk_on_contours(self, file1, file2,
-                        save=True,
-                        path=None):
+                            contours_db=None,):
         with np.load(file1) as f1:
             kpoints1 = f1["kpoints"]
             wavefunctions1 = f1["wavefunctions"]
-
         with np.load(file2) as f2:
             kpoints2 = f2["kpoints"]
             wavefunctions2 = f2["wavefunctions"]
+
         V_on_contours = self.get_on_kpoints(kpt_red_left=kpoints1, kpt_red_right=kpoints2,
                                             u_left=wavefunctions1, u_right=wavefunctions2)
-        if save:
-            path1, f1 = os.path.split(file1)
-            path2, f2 = os.path.split(file2)
-            if path is not None:
-                path1 = path
-                if path2 != path1:
-                    Warning(
-                        f"Warning: the two files are in different directories ({path1} and {path2}), but the output will be saved to {path1}")
-            np.savez(
-                f"{path1}/Vkk_{f1[8:-4]}_{f2[8:-4]}.npz", Vkk=V_on_contours)
+        if contours_db is not None:
+            ib1 = contours_db.split_filename(file1)["ib"]
+            ib2 = contours_db.split_filename(file2)["ib"]
+            EF1 = contours_db.split_filename(file1)["EF"]
+            EF2 = contours_db.split_filename(file2)["EF"]
+            assert EF1 == EF2, f"Fermi levels in the two contour files do not match: {EF1} and {EF2} diff is {EF1-EF2}"
+            contours_db.set_data("Vkk", dict(Vkk=V_on_contours),
+                                 ib1=ib1, ib2=ib2, EF=EF1)
         return V_on_contours
-    
-    def get_Vkk_on_contours_all(self, path, Efermi_list=None):
+
+    def get_Vkk_on_contours_all(self, contours_db, Efermi_list=None):
         if Efermi_list is None:
-            Efermi_list = get_all_Fermi_levels(path)
+            Efermi_list = contours_db.get_all_Efermi()
+        print(
+            f"Calculating scattering matrix on contours for Efermi_list={Efermi_list}")
         for Efermi in Efermi_list:
-            file_list = get_contour_files_Efermi(path, Efermi)
+            file_list = contours_db.get_files_Efermi("contour", Efermi)
             for f1 in file_list:
                 for f2 in file_list:
-                    print (f"Calculating scattering matrix on contours for Efermi={Efermi} using files {f1} and {f2}")
-                    self.get_Vkk_on_contours(f1, f2, save=True, path=path)
+                    print(
+                        f"Calculating scattering matrix on contours for Efermi={Efermi} using files {f1} and {f2}")
+                    self.get_Vkk_on_contours(f1, f2, contours_db=contours_db)
 
     @property
     def multipole_eigenvalues(self):
         if not hasattr(self, "_multipole_eigenvalues"):
             self.multipole_decomposition_RR()
         return self._multipole_eigenvalues
-        
+
     @property
     def multipole_eigenvectors(self):
         if not hasattr(self, "_multipole_eigenvectors"):
@@ -216,101 +218,105 @@ class ScatteringMatrix:
 
     def multipole_decomposition_RR(self, select_threshold=-1):
         assert self.Vrrab is not None, "Vrrab is not set, please set it first using set_RR"
-        Vrarb = self.Vrrab.transpose(0, 2, 1, 3).reshape(self.rvec.nRvec*self.num_wann, self.rvec.nRvec*self.num_wann)
-        e,v = np.linalg.eigh(Vrarb)
+        Vrarb = self.Vrrab.transpose(0, 2, 1, 3).reshape(
+            self.rvec.nRvec*self.num_wann, self.rvec.nRvec*self.num_wann)
+        e, v = np.linalg.eigh(Vrarb)
         srt = np.argsort(-abs(e))
-        e=e[srt]
-        if e[0] <1e-15:
+        e = e[srt]
+        if e[0] < 1e-15:
             print("Warning: the largest eigenvalue is smaller than 1e-15, which may indicate that the scattering matrix is not properly set or that the system is very weakly scattering")
             return np.zeros(0), np.zeros((0, self.rvec.nRvec, self.num_wann))
-        nselect = max(np.where(e/e[0]>select_threshold)[0]+1)
+        nselect = max(np.where(e/e[0] > select_threshold)[0]+1)
         e = e[:nselect]
         v = v[:, srt[:nselect]]
         self._multipole_eigenvalues = e
-        self._multipole_eigenvectors = v.T.reshape(nselect, self.rvec.nRvec, self.num_wann)
+        self._multipole_eigenvectors = v.T.reshape(
+            nselect, self.rvec.nRvec, self.num_wann)
         return self._multipole_eigenvalues, self._multipole_eigenvectors
-    
 
     def get_multipole_on_contour(self, file,
-                        save=True,
-                        path=None):
+                                 contours_db=None):
         with np.load(file) as f:
             kpoints = f["kpoints"]
             wavefunctions = f["wavefunctions"]
             weight = f["weights"]
-        
-        v = self.multipole_eigenvectors
-        l = self.multipole_eigenvalues
-        
-        exp = np.exp(-2j * np.pi * cached_einsum('Ri,kj->Rk', self.rvec.iRvec, kpoints))
-        W = cached_einsum('lRa, Rk, ka -> lk', v, exp, wavefunctions)
-        vertex = cached_einsum('lk, k, mk , m-> lm', W.conj(), weight, W, l)
-        projector = cached_einsum('lk, mk, m -> klm', W.conj(), W, l)
-        if save:
-            path1, f1 = os.path.split(file)
-            if path is None:
-                path = path1
-            np.savez(
-                f"{path1}/multipole_vertex_{f1[8:-4]}.npz", vertex=vertex, projector=projector, kpoints=kpoints)
-        return vertex, projector
-    
-    def get_multipole_on_contours_all(self, path, Efermi_list=None):
-        if Efermi_list is None:
-            Efermi_list = get_all_Fermi_levels(path)
-        for Efermi in Efermi_list:
-            file_list = get_contour_files_Efermi(path, Efermi)
-            for f in file_list:
-                print (f"Calculating multipole vertex on contour for Efermi={Efermi} using file {f}")
-                self.get_multipole_on_contour(f, save=True, path=path)
-            
 
- def get_linewidth_Efermi(path, Efermi):
-    files_contour = get_contour_files_Efermi(path, Efermi)
-    files_Vkk_dict = get_Vkk_files_Efermi(path, Efermi)
-    contour_dict = {get_ib_from_filename(f): f for f in files_contour}
+        v = self.multipole_eigenvectors
+        e = self.multipole_eigenvalues
+
+        exp = np.exp(-2j * np.pi * cached_einsum('Ri,kj->Rk',
+                     self.rvec.iRvec, kpoints))
+        W = cached_einsum('lRa, Rk, ka -> lk', v, exp, wavefunctions)
+        vertex = cached_einsum('lk, k, mk , m-> lm', W.conj(), weight, W, e)
+        projector = cached_einsum('lk, mk, m -> klm', W.conj(), W, e)
+        if contours_db is not None:
+            ib = contours_db.split_filename(file)["ib"]
+            EF = contours_db.split_filename(file)["EF"]
+            contours_db.set_data("multipole-vertex", dict(vertex=vertex, projector=projector, kpoints=kpoints),
+                                 ib=ib, EF=EF)
+        return vertex, projector
+
+    def get_multipole_on_contours_all(self, contours_db, Efermi_list=None):
+        if Efermi_list is None:
+            Efermi_list = contours_db.get_all_Efermi()
+        print(
+            f"Calculating multipole vertex on contours for Efermi_list={Efermi_list}")
+        for Efermi in Efermi_list:
+            file_list = contours_db.get_files_Efermi("contour", Efermi)
+            for f in file_list:
+                print(
+                    f"Calculating multipole vertex on contour for Efermi={Efermi} using file {f}")
+                self.get_multipole_on_contour(f, contours_db=contours_db)
+
+
+def get_linewidth_Efermi(contours_db, EF):
+    files_contour = contours_db.get_files_Efermi("contour", EF)
+    contour_dict = {contours_db.split_filename(
+        f)["ib"]: f for f in files_contour}
     linewidth_dict = {}
     for ib, file_contour in contour_dict.items():
         contour1 = np.load(file_contour)
-        linewidth_dict[ib] = np.zeros(contour1["kpoints"].shape[0], dtype=float)
+        linewidth_dict[ib] = np.zeros(
+            contour1["kpoints"].shape[0], dtype=float)
         for ib2 in contour_dict.keys():
-            contour2 = np.load(contour_dict[ib2])
-            if (ib, ib2) not in files_Vkk_dict:
-                Warning(f"Warning: no Vkk file found for ib1={ib}, ib2={ib2} and Efermi={Efermi}, skipping this pair")
-                continue
-            else:
-                file_Vkk = np.load(files_Vkk_dict[(ib, ib2)])
-            if (ib2, ib) not in files_Vkk_dict:
-                Warning(f"Warning: no Vkk file found for ib1={ib2}, ib2={ib} and Efermi={Efermi}, skipping this pair")
-                continue
-            else:
-                file_Vkk_conj = np.load(files_Vkk_dict[(ib2, ib)])
-            assert np.allclose(file_Vkk["Vkk"], file_Vkk_conj["Vkk"].conj().T), f"Warning: Vkk file for ib1={ib}, ib2={ib2} and Efermi={Efermi} is not the conjugate transpose of the Vkk file for ib1={ib2}, ib2={ib} and Efermi={Efermi}, skipping this pair"
-            linewidth = cached_einsum('kq, q, qk -> k', file_Vkk["Vkk"], contour2["weights"], file_Vkk_conj["Vkk"])
-            assert np.all(abs(linewidth.imag) < 1e-5), f"Warning: linewidth has significant imaginary part for ib1={ib}, ib2={ib2} and Efermi={Efermi}, but expected to be real, skipping this pair"
-            np.savez(os.path.join(path, f"linewidth_ib{ib}_ib{ib2}_EF={Efermi:.5f}.npz"), 
-                    linewidth=linewidth, kpoints=contour1["kpoints"], weights=contour1["weights"])
-            
+            print(
+                f"Calculating linewidth for Efermi={EF} using contours for ib1={ib} and ib2={ib2}")
+            w = np.load(contour_dict[ib2])["weights"]
+            Vkk = contours_db.get_data(
+                typ="Vkk", ib1=ib, ib2=ib2, EF=EF, none_if_missing=False)["Vkk"]
+            Vkk_conj = contours_db.get_data(
+                typ="Vkk", ib1=ib2, ib2=ib, EF=EF, none_if_missing=False)["Vkk"]
+            assert np.allclose(
+                Vkk, Vkk_conj), f"Vkk file for ib1={ib}, ib2={ib2} and Efermi={EF} is not the conjugate transpose of the Vkk file for ib1={ib2}, ib2={ib} and Efermi={EF}, skipping this pair"
+            # linewidth = cached_einsum('kq, q, qk -> k', file_Vkk["Vkk"], contour2["weights"], file_Vkk_conj["Vkk"])
+            linewidth = np.einsum('kq,q,qk->k', Vkk, w, Vkk_conj).real
+            print(
+                f"Linewidth for ib1={ib}, ib2={ib2} and Efermi={EF} has min {linewidth.min()} and max {linewidth.max()}")
+            contours_db.set_data("linewidth", dict(linewidth=linewidth, kpoints=contour1["kpoints"], weights=contour1["weights"]),
+                                 ib1=ib, ib2=ib2, EF=EF)
+
             linewidth_dict[ib] += np.real(linewidth)
     return linewidth_dict
 
 
-def get_linewidth_multipole_Efermi(path, Efermi):
+def get_linewidth_multipole_Efermi(contours_db, EF):
     linewidths_dict = {}
-    files_contour = get_contour_files_Efermi(path, Efermi)
-    files_vertices_dict = get_vertices_files_Efermi(path, Efermi)
+    files_contour = contours_db.get_files_Efermi("contour", EF)
+    files_vertices = contours_db.get_files_Efermi("multipole-vertex", EF)
     for file_contour in files_contour:
-        ib = get_ib_from_filename(file_contour)
+        ib = contours_db.split_filename(file_contour)["ib"]
         contour = np.load(file_contour)
-        linewidths_dict[ib] = np.zeros(contour["kpoints"].shape[0], dtype=float)
-        vertex_file = get_vertix_file(ib, Efermi, path)
-        projector = np.load(vertex_file)["projector"]
-        for jb, vertex2 in files_vertices_dict.items():
-            vertex = np.load(vertex2)["vertex"]
-            print (f"{vertex.shape=}, {projector.shape=}")
-            linewidths = cached_einsum('klm, ml -> k', projector, vertex)
+        linewidths_dict[ib] = np.zeros(
+            contour["kpoints"].shape[0], dtype=float)
+        vertex_file = contours_db.get_data(
+            typ="multipole-vertex", ib=ib, EF=EF)
+        projector = vertex_file["projector"]
+        for vertex2_file in files_vertices:
+            jb = contours_db.split_filename(vertex2_file)["ib"]
+            vertex2 = np.load(vertex2_file)["vertex"]
+            print(f"{vertex2.shape=}, {projector.shape=}")
+            linewidths = cached_einsum('klm, ml -> k', projector, vertex2)
             linewidths_dict[ib] += np.real(linewidths)
-            np.savez(os.path.join(path, f"linewidth_multipole_ib{ib}_ib{jb}_EF={Efermi:.5f}.npz"),
-                    linewidth=linewidths, kpoints=contour["kpoints"], weights=contour["weights"])
+            contours_db.set_data("linewidth-multipole", dict(linewidth=linewidths, kpoints=contour["kpoints"], weights=contour["weights"]),
+                                 ib=ib, ib2=jb, EF=EF)
     return linewidths_dict
-            
-      

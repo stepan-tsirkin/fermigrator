@@ -1,16 +1,15 @@
 import numpy as np
 
 
-
 def intersections(contour1, contour2):
     """Find the intersection points of trwo contours. Each counour ig geven by its 
     segments (start and end points) and does NOT have to be continuous, so thew segments order is not important. 
-    
+
     Parameters
     ----------
     contour1, contour2 : np.array
         An array of shape (N, 2, 2) where each row represents a segment of the contour in the format [[x1, y1],[ x2, y2]].
-    
+
     Returns
     -------
     list of tuples (i,j, x, y)
@@ -30,18 +29,22 @@ def intersections(contour1, contour2):
     for i, j in candidate_pairs:
         p1, p2 = contour1[i]
         p3, p4 = contour2[j]
-        denom = (p4[1] - p3[1]) * (p2[0] - p1[0]) - (p4[0] - p3[0]) * (p2[1] - p1[1])
+        denom = (p4[1] - p3[1]) * (p2[0] - p1[0]) - \
+            (p4[0] - p3[0]) * (p2[1] - p1[1])
         if denom == 0:
             continue  # Parallel lines
             # note, that parallel lines can still intersect if they are collinear, but we ignore this case for now
             # it can actually lead to singularities in QPI
-        ua = ((p4[0] - p3[0]) * (p1[1] - p3[1]) - (p4[1] - p3[1]) * (p1[0] - p3[0])) / denom
-        ub = ((p2[0] - p1[0]) * (p1[1] - p3[1]) - (p2[1] - p1[1]) * (p1[0] - p3[0])) / denom
+        ua = ((p4[0] - p3[0]) * (p1[1] - p3[1]) -
+              (p4[1] - p3[1]) * (p1[0] - p3[0])) / denom
+        ub = ((p2[0] - p1[0]) * (p1[1] - p3[1]) -
+              (p2[1] - p1[1]) * (p1[0] - p3[0])) / denom
         if 0 <= ua <= 1 and 0 <= ub <= 1:
             x = p1[0] + ua * (p2[0] - p1[0])
             y = p1[1] + ua * (p2[1] - p1[1])
             intersections.append((i, j, x, y))
     return intersections
+
 
 def cut_boundary(contour, indices, axis, side):
     # by construction, the start point of each segment is within the unit square, so we only need to check the end point of each segment
@@ -75,18 +78,17 @@ def cut_boundary(contour, indices, axis, side):
     return contour, indices
 
 
-
 def shift_contour_mod1(contour, q):
     """Shift the contour points to be within the unit square [0, 1] x [0, 1] by applying modulo 1 to the coordinates.
     If some segments of the contour cross the boundary of the unit square, they will be split into multiple segments that lie within the unit square.
-    
+
     Parameters
     ----------
     contour : np.array
         An array of shape (N, 2, 2) where each row represents a segment of the contour in the format [[x1, y1],[ x2, y2]].
     q : np.array (2,)
         A 2D vector that represents the shift to be applied to the contour points.
-    
+
     Returns
     -------
     np.array (M, 2, 2)
@@ -107,5 +109,3 @@ def shift_contour_mod1(contour, q):
         for side in ["lower", "upper"]:
             contour, indices = cut_boundary(contour, indices, axis, side)
     return contour, indices
-
-    

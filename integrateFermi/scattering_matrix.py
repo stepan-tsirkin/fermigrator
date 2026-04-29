@@ -17,6 +17,10 @@ class ScatteringMatrix:
             self.Vrrab = Vrrab
             assert Vrrab.shape == (rvec.nRvec, rvec.nRvec, self.num_wann,
                                    self.num_wann), f"Vrrab should have shape (nRvec, nRvec, num_wann, num_wann), but got {Vrrab.shape}"
+            diff = Vrrab - Vrrab.transpose(1, 0, 3, 2).conj()
+            max_diff = np.max(np.abs(diff))
+            assert max_diff < 1e-10, f"Vrrab is not Hermitian, max difference is {max_diff}, which may indicate that the transformation from Vkkmn to Vrrab is not correct or that the input Vkkmn is not correct"
+        
         elif num_wann is not None:
             self.Vrrab = np.zeros(
                 (rvec.nRvec, rvec.nRvec, num_wann, num_wann), dtype=complex)
@@ -24,70 +28,32 @@ class ScatteringMatrix:
             raise ValueError("Either Vrrab or num_wann should be provided")
 
     @classmethod
-    def from_Vkk(cls, Vkkmn, gauge="wannier",
+    def from_Vkk(cls, Vkkmn_wan, 
                  center_red=None,
                  wannier_centers_red=None,
                  real_lattice=None,
-                 chk=None, selected_bands=None):
-        if isinstance(Vkkmn, str):
-            Vkkmn = np.load(Vkkmn)["V"]
-        if isinstance(chk, str):
-            from wannierberri.w90files.chk import CheckPoint
-            if chk.endswith(".chk"):
-                chk = CheckPoint.from_w90_file(chk[:-4])
-            elif chk.endswith(".npz"):
-                chk = CheckPoint.from_npz(chk)
-            else:
-                chk = CheckPoint.from_w90_file(chk+".npz")
-        assert gauge in [
-            "wannier", "bloch"], f"Gauge must be either 'wannier' or 'bloch', but got {gauge}"
-        assert Vkkmn.ndim == 4, f"Vkkmn must be a 4D array with shape (NK, NK, NB, NB), but got shape {Vkkmn.shape}"
-        assert Vkkmn.shape[0] == Vkkmn.shape[
-            1], f"The first two dimensions of Vkkmn must be the same, but got {Vkkmn.shape[0]} and {Vkkmn.shape[1]}"
-        assert Vkkmn.shape[2] == Vkkmn.shape[
-            3], f"The last two dimensions of Vkkmn must be the same, but got {Vkkmn.shape[2]} and {Vkkmn.shape[3]}"
-        num_kpts = Vkkmn.shape[0]
-        if gauge == "bloch":
-            assert chk is not None, "Checkpoint file must be provided to transform the scattering matrix to the Wannier gauge"
-            if selected_bands is not None:
-                Vkkmn = Vkkmn[:, :, selected_bands, :][:, :, :, selected_bands]
-            num_bands = Vkkmn.shape[2]
-            assert chk.num_kpts == num_kpts, f"Number of k-points in the scattering matrix ({num_kpts}) does not match the number of k-points in the checkpoint ({chk.num_kpts})"
-            assert chk.num_bands == num_bands, f"Number of bands in the scattering matrix ({num_bands}) does not match the number of bands in the checkpoint ({chk.num_bands})"
-            assert chk.v_matrix is not None, "The checkpoint does not contain the v_matrix, which is needed to transform the scattering matrix to the Wannier gauge"
-            Vkkab_w = np.zeros(
-                (num_kpts, num_kpts, num_bands, chk.num_wann), dtype=complex)
-            for ik in range(num_kpts):
-                Vkkab_w[ik, :, :, :] = cached_einsum(
-                    'kij,jb->kib', Vkkmn[:, ik, :, :], chk.v_matrix[ik])
-            del Vkkmn
-            Vkkab_wan = np.zeros(
-                (num_kpts, chk.num_kpts, chk.num_wann, chk.num_wann), dtype=complex)
-            for ik in range(num_kpts):
-                Vkkab_wan[:, ik, :, :] = cached_einsum(
-                    'kib,ia->kab', Vkkab_w[:, ik, :, :], chk.v_matrix[ik, :].conj())
-            del Vkkab_w
-        num_wann = Vkkab_wan.shape[2]
-        if wannier_centers_red is None:
-            if chk is None:
-                wannier_centers_red = np.zeros(
-                    (num_kpts, num_wann, 3), dtype=float)
-            else:
-                wannier_centers_red = chk.wannier_centers_cart @ np.linalg.inv(
-                    chk.real_lattice)
+                 rvectors=None,
+                 mp_grid=None,
+                 kpt_red=None):
+                
+        assert Vkkmn_wan.ndim == 4, f"Vkkmn_wan must be a 4D array with shape (NK, NK, NB, NB), but got shape {Vkkmn_wan.shape}"
+        assert Vkkmn_wan.shape[0] == Vkkmn_wan.shape[
+            1], f"The first two dimensions of Vkkmn_wan must be the same, but got {Vkkmn_wan.shape[0]} and {Vkkmn_wan.shape[1]}"
+        assert Vkkmn_wan.shape[2] == Vkkmn_wan.shape[
+            3], f"The last two dimensions of Vkkmn_wan must be the same, but got {Vkkmn_wan.shape[2]} and {Vkkmn_wan.shape[3]}"
+
         if center_red is None:
             center_red = np.zeros(3, dtype=float)
-        if real_lattice is None:
-            real_lattice = chk.real_lattice
+        if rvectors is None:
+            rvectors = Rvectors(
+                lattice=real_lattice,
+                shifts_left_red=[center_red],
+                shifts_right_red=wannier_centers_red,
+            )
+            rvectors.set_Rvec(mp_grid=mp_grid)
+            rvectors.set_fft_q_to_R(kpt_red=kpt_red)
 
-        rvectors = Rvectors(
-            lattice=chk.real_lattice,
-            shifts_left_red=[center_red],
-            shifts_right_red=wannier_centers_red,
-        )
-        rvectors.set_Rvec(mp_grid=chk.mp_grid)
-        rvectors.set_fft_q_to_R(kpt_red=chk.kpt_red)
-        Vabcrr = rvectors.qq_to_RR(Vkkab_wan[:, :, :, :, None])
+        Vabcrr = rvectors.qq_to_RR(Vkkmn_wan[:, :, :, :, None])
         Vrrab = Vabcrr[:, :, 0, :, :].transpose(2, 3, 0, 1)
         return cls(rvec=rvectors, Vrrab=Vrrab)
 
@@ -269,54 +235,57 @@ class ScatteringMatrix:
                 self.get_multipole_on_contour(f, contours_db=contours_db)
 
 
-def get_linewidth_Efermi(contours_db, EF):
-    files_contour = contours_db.get_files_Efermi("contour", EF)
-    contour_dict = {contours_db.split_filename(
-        f)["ib"]: f for f in files_contour}
-    linewidth_dict = {}
-    for ib, file_contour in contour_dict.items():
-        contour1 = np.load(file_contour)
-        linewidth_dict[ib] = np.zeros(
-            contour1["kpoints"].shape[0], dtype=float)
-        for ib2 in contour_dict.keys():
-            print(
-                f"Calculating linewidth for Efermi={EF} using contours for ib1={ib} and ib2={ib2}")
-            w = np.load(contour_dict[ib2])["weights"]
-            Vkk = contours_db.get_data(
-                typ="Vkk", ib1=ib, ib2=ib2, EF=EF, none_if_missing=False)["Vkk"]
-            Vkk_conj = contours_db.get_data(
-                typ="Vkk", ib1=ib2, ib2=ib, EF=EF, none_if_missing=False)["Vkk"]
-            assert np.allclose(
-                Vkk, Vkk_conj), f"Vkk file for ib1={ib}, ib2={ib2} and Efermi={EF} is not the conjugate transpose of the Vkk file for ib1={ib2}, ib2={ib} and Efermi={EF}, skipping this pair"
-            # linewidth = cached_einsum('kq, q, qk -> k', file_Vkk["Vkk"], contour2["weights"], file_Vkk_conj["Vkk"])
-            linewidth = np.einsum('kq,q,qk->k', Vkk, w, Vkk_conj).real
-            print(
-                f"Linewidth for ib1={ib}, ib2={ib2} and Efermi={EF} has min {linewidth.min()} and max {linewidth.max()}")
-            contours_db.set_data("linewidth", dict(linewidth=linewidth, kpoints=contour1["kpoints"], weights=contour1["weights"]),
-                                 ib1=ib, ib2=ib2, EF=EF)
+def bloch2wann(Vkkmn,
+               chk, 
+               nspin=1,
+               selected_bands=None):
+    """
+    Transform the scattering matrix from the Bloch gauge to the Wannier gauge
 
-            linewidth_dict[ib] += np.real(linewidth)
-    return linewidth_dict
+    Parameters
+    ----------
+    Vkkmn : array_like
+        The scattering matrix in the Bloch gauge, with shape (NK, NK, NB, NB) (nspin=1) 
+        or (nspin, NK, NK, NB, 2, NB, 2) (nspin=2)
+    chk : CheckPoint or str
+        The checkpoint file (from wannier90 or wannierberri)
+    nspin : int, optional
+        The number of spins, 1 or 2  (nspin=2 assumes that chk is spinless, but the scattering matrix 
+        depends on spin)
+    
+    """
+    kpt_red = chk.kpt_red
+    num_kpts = kpt_red.shape[0]
+    assert chk is not None, "Checkpoint file must be provided to transform the scattering matrix to the Wannier gauge"
+    if nspin == 1:
+        Vkkmn = Vkkmn[:, :, :, None, :, None]
+    if selected_bands is not None:
+        Vkkmn = Vkkmn[:, :, selected_bands, :, :, :][:, :, :, :, selected_bands, :]
+    num_bands = Vkkmn.shape[2]
+    assert chk.num_kpts == num_kpts, f"Number of k-points in the scattering matrix ({num_kpts}) does not match the number of k-points in the checkpoint ({chk.num_kpts})"
+    assert chk.num_bands == num_bands, f"Number of bands in the scattering matrix ({num_bands}) does not match the number of bands in the checkpoint ({chk.num_bands})"
+    assert chk.v_matrix is not None, "The checkpoint does not contain the v_matrix, which is needed to transform the scattering matrix to the Wannier gauge"
+    Vkkab_w = np.zeros(
+        (num_kpts, num_kpts, num_bands, nspin, chk.num_wann, nspin), dtype=complex)
+    for ik in range(num_kpts):
+        Vkkab_w[ :, ik :, :, :, :] = cached_einsum(
+            'kisjt,jb->kisbt', Vkkmn[:, ik], chk.v_matrix[ik])
+    Vkkab_wan = np.zeros(
+        (num_kpts, chk.num_kpts, chk.num_wann, nspin, chk.num_wann, nspin), dtype=complex)
+    for ik in range(num_kpts):
+        Vkkab_wan[ik, :, :, :] = cached_einsum(
+            'kisbt,ia->kasbt', Vkkab_w[ik, :, :, :], chk.v_matrix[ik, :].conj())
+    return Vkkab_wan
 
-
-def get_linewidth_multipole_Efermi(contours_db, EF):
-    linewidths_dict = {}
-    files_contour = contours_db.get_files_Efermi("contour", EF)
-    files_vertices = contours_db.get_files_Efermi("multipole-vertex", EF)
-    for file_contour in files_contour:
-        ib = contours_db.split_filename(file_contour)["ib"]
-        contour = np.load(file_contour)
-        linewidths_dict[ib] = np.zeros(
-            contour["kpoints"].shape[0], dtype=float)
-        vertex_file = contours_db.get_data(
-            typ="multipole-vertex", ib=ib, EF=EF)
-        projector = vertex_file["projector"]
-        for vertex2_file in files_vertices:
-            jb = contours_db.split_filename(vertex2_file)["ib"]
-            vertex2 = np.load(vertex2_file)["vertex"]
-            print(f"{vertex2.shape=}, {projector.shape=}")
-            linewidths = cached_einsum('klm, ml -> k', projector, vertex2)
-            linewidths_dict[ib] += np.real(linewidths)
-            contours_db.set_data("linewidth-multipole", dict(linewidth=linewidths, kpoints=contour["kpoints"], weights=contour["weights"]),
-                                 ib=ib, ib2=jb, EF=EF)
-    return linewidths_dict
+def get_chk(chk):
+    if chk is None:
+        return None
+    from wannierberri.w90files.chk import CheckPoint
+    if isinstance(chk, CheckPoint):
+        return chk
+    if isinstance(chk, str):
+        if chk.endswith(".chk"):
+            return CheckPoint.from_w90_file(chk[:-4])
+        elif chk.endswith(".npz"):
+            return CheckPoint.from_npz(chk)
+    raise ValueError(f"chk should be either a CheckPoint object or a string ending with .chk or .npz, but got  type {type(chk)} and value {chk}")

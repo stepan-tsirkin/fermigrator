@@ -144,7 +144,9 @@ class ContourDatabase:
         from wannierberri.calculators.tabulate import TabulatorAll
         from wannierberri import run
 
-        if isinstance(grid, int):
+        if isinstance(grid, Grid):
+            pass
+        elif isinstance(grid, int):
             grid = Grid(self.system, NK=(grid, grid, 1))
         elif isinstance(grid, tuple) or isinstance(grid, list) or isinstance(grid, np.ndarray):
             assert len(grid) == 2, "grid should have length 2 for 2D system"
@@ -153,7 +155,7 @@ class ContourDatabase:
             grid = Grid(self.system, **grid)
         else:
             raise ValueError(
-                "grid should be either a tuple/list/ndarray of NK, or a dict of parameters for Grid")
+                "grid should be either a wannierberri.Grid/tuple/list/ndarray of NK, or a dict of parameters for Grid")
         assert grid.dense[2] == 1, "grid should be 2D"
         calculators = {"tab": TabulatorAll(tabulators={})}
         results = run(self.system, calculators=calculators, grid=grid)

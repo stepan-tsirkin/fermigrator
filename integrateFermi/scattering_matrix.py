@@ -4,10 +4,14 @@ from wannierberri.fourier.rvectors import Rvectors
 
 
 class ScatteringMatrix:
+    """Electron scattering matrix stored in the Wannier R-space representation.
 
-    """
-    Class for the scattering matrix
+    Internally stores V_ab^{R1 R2}, the double Fourier transform of the
+    k-space matrix element V_{mn}(k, k'):
 
+        V_ab^{R1 R2} = (1/NK²) Σ_{k,k'} e^{-ik·R1} V_{ab}(k,k') e^{ik'·R2}
+
+    Hermiticity V_ab^{R1 R2} = (V_ba^{R2 R1})* is enforced on construction.
     """
 
     def __init__(self, rvec, Vrrab=None, num_wann=None,
@@ -28,14 +32,32 @@ class ScatteringMatrix:
             raise ValueError("Either Vrrab or num_wann should be provided")
 
     @classmethod
-    def from_Vkk(cls, Vkkmn_wan, 
+    def from_Vkk(cls, Vkkmn_wan,
                  center_red=None,
                  wannier_centers_red=None,
                  real_lattice=None,
                  rvectors=None,
                  mp_grid=None,
                  kpt_red=None):
-                
+        """Construct from a k-space scattering matrix in the Wannier gauge.
+
+        Parameters
+        ----------
+        Vkkmn_wan : ndarray, shape (NK, NK, NW, NW)
+            Matrix elements V_{mn}(k, k') in eV, Wannier gauge, on a uniform k-grid.
+        center_red : array (3,), optional
+            Reduced coordinates of the scattering centre (default: origin).
+        wannier_centers_red : array (NW, 3)
+            Wannier function centres in reduced coordinates.
+        real_lattice : array (3, 3)
+            Real-space lattice vectors in Å.
+        rvectors : Rvectors, optional
+            Pre-built Rvectors object; overrides the lattice/grid parameters.
+        mp_grid : array (3,)
+            Monkhorst–Pack grid dimensions used in the Wannier90 calculation.
+        kpt_red : array (NK, 3)
+            k-points in reduced coordinates matching the rows of Vkkmn_wan.
+        """
         assert Vkkmn_wan.ndim == 4, f"Vkkmn_wan must be a 4D array with shape (NK, NK, NB, NB), but got shape {Vkkmn_wan.shape}"
         assert Vkkmn_wan.shape[0] == Vkkmn_wan.shape[
             1], f"The first two dimensions of Vkkmn_wan must be the same, but got {Vkkmn_wan.shape[0]} and {Vkkmn_wan.shape[1]}"
@@ -121,23 +143,55 @@ class ScatteringMatrix:
                        u_left=None,
                        u_right=None,
                        ):
+        """Evaluate V_{mn}(k, k') for sets of k and k' points.
+
+        Computes the inverse Fourier transform:
+            V_{ab}(k, k') = Σ_{R,R'} e^{ik·R} V_ab^{RR'} e^{-ik'·R'}
+
+        and optionally contracts with wavefunctions to give band matrix elements:
+            V_{mn}(k, k') = Σ_{ab} u_{ma}^*(k) V_{ab}(k,k') u_{nb}(k')
+
+        Parameters
+        ----------
+        kpt_red_left, kpt_red_right : ndarray, shape (N, 3) and (M, 3)
+            k-points in reduced coordinates.
+        u_left, u_right : ndarray, shape (N, NW) and (M, NW), optional
+            Wavefunction columns U_K[:, iband] for band projection.
+
+        Returns
+        -------
+        ndarray, shape (N, M) if wavefunctions given, else (N, M, NW, NW)
+        """
         rvectors = self.rvec.iRvec
         exp_left = np.exp(
             2j * np.pi * cached_einsum('Ri,kj->Rk', rvectors, kpt_red_left))
         exp_right = np.exp(-2j * np.pi *
                            cached_einsum('Ri,kj->Rk', rvectors, kpt_red_right))
-        Vkkab = cached_einsum('Rk, Rrab, rq->kqab',
-                              exp_left, self.Vrrab, exp_right)
         assert (u_left is None) == (
             u_right is None), "u_left and u_right must be both None or both not None"
         if u_left is not None:
-            # TODO - is we combine with the previous - will it be faster?
-            return cached_einsum('ka,kqab,qb->kq', u_left.conj(), Vkkab, u_right)
+            return cached_einsum('ka,Rk,Rrab,rq,qb->kq',
+                                 u_left.conj(), exp_left, self.Vrrab, exp_right, u_right)
         else:
+            Vkkab = cached_einsum('Rk, Rrab, rq->kqab',
+                                  exp_left, self.Vrrab, exp_right)
             return Vkkab
 
-    def get_Vkk_on_contours(self, file1, file2,
-                            contours_db=None,):
+    def get_Vkk_on_contours(self, file1, file2, contours_db=None):
+        """Evaluate band matrix elements V_{m n}(k, k') between two contour files.
+
+        Loads k-points and wavefunctions from `file1` (left) and `file2` (right),
+        calls `get_on_kpoints`, and optionally saves the result to `contours_db`
+        as a ``Vkk`` entry keyed by (ib1, ib2, EF).
+
+        Parameters
+        ----------
+        file1, file2 : str
+            Paths to contour .npz files (must contain ``kpoints`` and ``wavefunctions``).
+        contours_db : ContourDatabase, optional
+            If provided, the result is saved and the band/EF labels are read from
+            the filenames.
+        """
         with np.load(file1) as f1:
             kpoints1 = f1["kpoints"]
             wavefunctions1 = f1["wavefunctions"]
@@ -158,6 +212,7 @@ class ScatteringMatrix:
         return V_on_contours
 
     def get_Vkk_on_contours_all(self, contours_db, Efermi_list=None):
+        """Compute and save V_{mn}(k,k') for all band pairs at each Fermi level."""
         if Efermi_list is None:
             Efermi_list = contours_db.get_all_Efermi()
         print(
@@ -183,6 +238,19 @@ class ScatteringMatrix:
         return self._multipole_eigenvectors
 
     def multipole_decomposition_RR(self, select_threshold=-1):
+        """Decompose V_ab^{RR'} into eigenmodes (multipoles).
+
+        Reshapes V_ab^{R1 R2} as a square matrix V_{(R1,a),(R2,b)}, then
+        diagonalises: V = Σ_l λ_l |φ_l><φ_l|.  Modes are sorted by |λ_l|
+        and those with |λ_l|/|λ_0| > select_threshold are kept.
+
+        Results are cached as _multipole_eigenvalues and _multipole_eigenvectors.
+
+        Parameters
+        ----------
+        select_threshold : float
+            Relative cutoff; -1 keeps all modes.
+        """
         assert self.Vrrab is not None, "Vrrab is not set, please set it first using set_RR"
         Vrarb = self.Vrrab.transpose(0, 2, 1, 3).reshape(
             self.rvec.nRvec*self.num_wann, self.rvec.nRvec*self.num_wann)
@@ -200,8 +268,28 @@ class ScatteringMatrix:
             nselect, self.rvec.nRvec, self.num_wann)
         return self._multipole_eigenvalues, self._multipole_eigenvectors
 
-    def get_multipole_on_contour(self, file,
-                                 contours_db=None):
+    def get_multipole_on_contour(self, file, contours_db=None):
+        """Project multipole eigenmodes onto a Fermi surface contour.
+
+        For each eigenmode φ_l with eigenvalue λ_l, evaluates the overlap
+        with the Bloch wavefunctions on the contour:
+
+            W_l(k) = Σ_{R,a} φ_l^{Ra} e^{-ik·R} u_a(k)
+
+        and computes two quantities saved under ``multipole-vertex``:
+
+        - ``vertex[l, m]``    = Σ_k W_l*(k) w(k) W_m(k) λ_m
+          (weighted overlap used in linewidth summations over k')
+        - ``projector[k,l,m]``= W_l*(k) W_m(k) λ_m
+          (k-resolved factor used when computing Γ(k) for a fixed k)
+
+        Parameters
+        ----------
+        file : str
+            Path to a contour .npz file (must contain kpoints, wavefunctions, weights).
+        contours_db : ContourDatabase, optional
+            If provided, results are saved under the ``multipole-vertex`` type.
+        """
         with np.load(file) as f:
             kpoints = f["kpoints"]
             wavefunctions = f["wavefunctions"]
@@ -223,6 +311,7 @@ class ScatteringMatrix:
         return vertex, projector
 
     def get_multipole_on_contours_all(self, contours_db, Efermi_list=None):
+        """Compute and save multipole vertex/projector for all contours at each Fermi level."""
         if Efermi_list is None:
             Efermi_list = contours_db.get_all_Efermi()
         print(
@@ -278,6 +367,12 @@ def bloch2wann(Vkkmn,
     return Vkkab_wan
 
 def get_chk(chk):
+    """Load a Wannier90 checkpoint as a WannierBerri CheckPoint object.
+
+    Accepts a CheckPoint instance (returned as-is), a path ending in ``.chk``
+    (loaded via wannier90 binary format), or a path ending in ``.npz``
+    (loaded from a previously serialised checkpoint).
+    """
     if chk is None:
         return None
     from wannierberri.w90files.chk import CheckPoint

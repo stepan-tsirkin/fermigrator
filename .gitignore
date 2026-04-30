@@ -70,3 +70,5 @@ Thumbs.db
 # Project specific
 contours/
 contours2/
+*.png
+*.dat

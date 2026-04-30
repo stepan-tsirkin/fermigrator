@@ -7,6 +7,12 @@ import numpy as np
 
 
 class NeverTransform:
+    """Sentinel that prevents WannierBerri from symmetrising the wavefunction.
+
+    WannierBerri applies time-reversal / inversion transforms when unfolding
+    k-points.  For the raw U_k matrix we want no such mixing, so we pass this
+    object as the transform and have it raise if accidentally invoked.
+    """
 
     def __init__(self):
         pass
@@ -22,6 +28,12 @@ nevertransform = NeverTransform()
 
 
 class TabulatorWaveFunction(Tabulator):
+    """WannierBerri tabulator that extracts U_K[:, :, iband] at each k-point.
+
+    U_K is the unitary rotation from the Wannier basis to the Bloch eigenstates.
+    Selecting a single band index gives the Wannier-gauge wavefunction column
+    needed for matrix-element evaluations on the Fermi surface.
+    """
 
     comment = "Tabulator for band wavefunction"
 
@@ -34,6 +46,25 @@ class TabulatorWaveFunction(Tabulator):
 
 
 def get_wavefunction_on_kpoints(system, kpoints, ibands, **kwargs_run):
+    """Evaluate Wannier-interpolated Bloch wavefunctions at arbitrary k-points.
+
+    Uses WannierBerri's path evaluator (Fourier interpolation via Wannier
+    functions) to obtain U_K at k-points that are not on the regular FFT grid.
+
+    Parameters
+    ----------
+    system : wannierberri.System_R
+    kpoints : array-like, shape (N, 2) or (N, 3) or (2,) or (3,)
+        k-points in reduced coordinates.  2D inputs are zero-padded to 3D.
+    ibands : int or iterable of int
+        Band index/indices to extract.
+
+    Returns
+    -------
+    ndarray
+        If ibands is int  : shape (N, num_wann)   — U_K[:, :, iband]
+        If ibands is list : shape (N, len(ibands), num_wann)
+    """
     assert isinstance(ibands, int) or (isinstance(ibands, Iterable) and all(isinstance(i, int) for i in ibands)), \
         "ibands should be an int or an iterable of ints"
     tabulator = TabulatorWaveFunction(ibands=ibands)

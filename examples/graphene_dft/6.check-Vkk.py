@@ -28,9 +28,5 @@ scatter = ScatteringMatrix.from_Vkk(Vkkmn_wan=Vkk,
 Vkk_new = scatter.get_on_kpoints(kpt_red_left=kpt_red, kpt_red_right=kpt_red)
 print(f"Wannier centers in reduced coordinates: {wannier_centers_red_spin}")
 
-i=0
-j=1
-diff = np.abs(Vkk_new[i,j] - Vkk[i,j])
-print (f"Vkk_new on kpoints: {Vkk_new[i,j]}")
-print (f"Vkk on mp grid: {Vkk[i,j]}")
+diff = np.abs(Vkk_new - Vkk)
 print (f"Max difference between Vkk on kpoints and Vkk on mp grid is {diff.max():.2e} eV")  

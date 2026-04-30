@@ -1,6 +1,6 @@
 import numpy as np
 from wannierberri.utility import cached_einsum
-from wannierberri.fourier.rvectors import Rvectors
+from .rvectors import Rvectors2
 
 
 class ScatteringMatrix:
@@ -67,7 +67,7 @@ class ScatteringMatrix:
         if center_red is None:
             center_red = np.zeros(3, dtype=float)
         if rvectors is None:
-            rvectors = Rvectors(
+            rvectors = Rvectors2(
                 lattice=real_lattice,
                 shifts_left_red=[center_red],
                 shifts_right_red=wannier_centers_red,
@@ -162,20 +162,14 @@ class ScatteringMatrix:
         -------
         ndarray, shape (N, M) if wavefunctions given, else (N, M, NW, NW)
         """
-        rvectors = self.rvec.iRvec
-        exp_left = np.exp(
-            2j * np.pi * cached_einsum('Ri,kj->Rk', rvectors, kpt_red_left))
-        exp_right = np.exp(-2j * np.pi *
-                           cached_einsum('Ri,kj->Rk', rvectors, kpt_red_right))
+        Vkk = self.rvec.RR_to_kk(self.Vrrab, kpt_red_left, kpt_red_right)
         assert (u_left is None) == (
             u_right is None), "u_left and u_right must be both None or both not None"
         if u_left is not None:
-            return cached_einsum('ka,Rk,Rrab,rq,qb->kq',
-                                 u_left.conj(), exp_left, self.Vrrab, exp_right, u_right)
+            return cached_einsum('ka,kqab,qb->kq',
+                                 u_left.conj(), Vkk, u_right)
         else:
-            Vkkab = cached_einsum('Rk, Rrab, rq->kqab',
-                                  exp_left, self.Vrrab, exp_right)
-            return Vkkab
+            return Vkk
 
     def get_Vkk_on_contours(self, file1, file2, contours_db=None):
         """Evaluate band matrix elements V_{m n}(k, k') between two contour files.

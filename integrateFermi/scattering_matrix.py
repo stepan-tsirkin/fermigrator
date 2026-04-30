@@ -53,7 +53,7 @@ class ScatteringMatrix:
             rvectors.set_Rvec(mp_grid=mp_grid)
             rvectors.set_fft_q_to_R(kpt_red=kpt_red)
 
-        Vabcrr = rvectors.qq_to_RR(Vkkmn_wan[:, :, :, :, None])
+        Vabcrr = rvectors.qq_to_RR(Vkkmn_wan[:, :, :, :, None]) 
         Vrrab = Vabcrr[:, :, 0, :, :].transpose(2, 3, 0, 1)
         return cls(rvec=rvectors, Vrrab=Vrrab)
 

@@ -5,6 +5,13 @@ import numpy as np
 
 
 class ContourDatabase:
+    """File-based database for Fermi surface contours and related quantities.
+
+    Data are stored as `.npz` files under `path/` with names of the form
+    `{type}_ib={band}_EF={energy}.npz`.  A `metadata.npz` in the same
+    directory records the formatting precision so filenames can be parsed
+    consistently across sessions.
+    """
 
     file_types = ["contour", "vertex", "energies_grid", "Vkk", "linewidth"]
 

@@ -2,18 +2,26 @@ import numpy as np
 
 
 def intersections(contour1, contour2):
-    """Find the intersection points of trwo contours. Each counour ig geven by its 
-    segments (start and end points) and does NOT have to be continuous, so thew segments order is not important. 
+    """Find intersection points between two sets of line segments.
+
+    Used in QPI analysis to locate scattering vectors Q = k - k' where the
+    shifted Fermi surface (contour2 translated by Q) crosses the original one.
 
     Parameters
     ----------
-    contour1, contour2 : np.array
-        An array of shape (N, 2, 2) where each row represents a segment of the contour in the format [[x1, y1],[ x2, y2]].
+    contour1, contour2 : ndarray, shape (N, 2, 2)
+        Line segments as [[x1, y1], [x2, y2]] pairs.  Need not be continuous.
 
     Returns
     -------
-    list of tuples (i,j, x, y)
-        A list of tuples where each tuple contains the indices of the segments from contour1 and contour2 that intersect, and the coordinates of the intersection point (x, y).
+    list of (i, j, x, y)
+        Segment index from contour1, segment index from contour2, and the
+        Cartesian coordinates of the intersection point.
+
+    Notes
+    -----
+    Collinear segments are silently skipped (denom == 0).  This is an
+    approximation; collinear cases can produce integrable singularities in QPI.
     """
     c1min = contour1.min(axis=1)
     c1max = contour1.max(axis=1)
@@ -47,6 +55,23 @@ def intersections(contour1, contour2):
 
 
 def cut_boundary(contour, indices, axis, side):
+    """Split segments that cross the unit-cell boundary on one side.
+
+    For segments whose end point exits the unit square on the given `side`,
+    the segment is truncated at the boundary and the wrapped continuation is
+    appended.  This preserves the periodic topology while keeping all
+    coordinates within [0, 1].
+
+    Parameters
+    ----------
+    contour : ndarray, shape (N, 2, 2)
+        Segments in reduced coordinates, modified in place for truncated ends.
+    indices : ndarray (N,)
+        Original segment indices; extended to match appended segments.
+    axis : int
+        0 for x-boundary, 1 for y-boundary.
+    side : {'lower', 'upper'}
+    """
     # by construction, the start point of each segment is within the unit square, so we only need to check the end point of each segment
     shift = np.zeros(2)
     epsilon = 1e-7

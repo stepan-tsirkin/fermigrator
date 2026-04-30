@@ -4,10 +4,14 @@ from wannierberri.fourier.rvectors import Rvectors
 
 
 class ScatteringMatrix:
+    """Electron scattering matrix stored in the Wannier R-space representation.
 
-    """
-    Class for the scattering matrix
+    Internally stores V_ab^{R1 R2}, the double Fourier transform of the
+    k-space matrix element V_{mn}(k, k'):
 
+        V_ab^{R1 R2} = (1/NK²) Σ_{k,k'} e^{-ik·R1} V_{ab}(k,k') e^{ik'·R2}
+
+    Hermiticity V_ab^{R1 R2} = (V_ba^{R2 R1})* is enforced on construction.
     """
 
     def __init__(self, rvec, Vrrab=None, num_wann=None,
@@ -28,14 +32,32 @@ class ScatteringMatrix:
             raise ValueError("Either Vrrab or num_wann should be provided")
 
     @classmethod
-    def from_Vkk(cls, Vkkmn_wan, 
+    def from_Vkk(cls, Vkkmn_wan,
                  center_red=None,
                  wannier_centers_red=None,
                  real_lattice=None,
                  rvectors=None,
                  mp_grid=None,
                  kpt_red=None):
-                
+        """Construct from a k-space scattering matrix in the Wannier gauge.
+
+        Parameters
+        ----------
+        Vkkmn_wan : ndarray, shape (NK, NK, NW, NW)
+            Matrix elements V_{mn}(k, k') in eV, Wannier gauge, on a uniform k-grid.
+        center_red : array (3,), optional
+            Reduced coordinates of the scattering centre (default: origin).
+        wannier_centers_red : array (NW, 3)
+            Wannier function centres in reduced coordinates.
+        real_lattice : array (3, 3)
+            Real-space lattice vectors in Å.
+        rvectors : Rvectors, optional
+            Pre-built Rvectors object; overrides the lattice/grid parameters.
+        mp_grid : array (3,)
+            Monkhorst–Pack grid dimensions used in the Wannier90 calculation.
+        kpt_red : array (NK, 3)
+            k-points in reduced coordinates matching the rows of Vkkmn_wan.
+        """
         assert Vkkmn_wan.ndim == 4, f"Vkkmn_wan must be a 4D array with shape (NK, NK, NB, NB), but got shape {Vkkmn_wan.shape}"
         assert Vkkmn_wan.shape[0] == Vkkmn_wan.shape[
             1], f"The first two dimensions of Vkkmn_wan must be the same, but got {Vkkmn_wan.shape[0]} and {Vkkmn_wan.shape[1]}"
@@ -121,6 +143,25 @@ class ScatteringMatrix:
                        u_left=None,
                        u_right=None,
                        ):
+        """Evaluate V_{mn}(k, k') for sets of k and k' points.
+
+        Computes the inverse Fourier transform:
+            V_{ab}(k, k') = Σ_{R,R'} e^{ik·R} V_ab^{RR'} e^{-ik'·R'}
+
+        and optionally contracts with wavefunctions to give band matrix elements:
+            V_{mn}(k, k') = Σ_{ab} u_{ma}^*(k) V_{ab}(k,k') u_{nb}(k')
+
+        Parameters
+        ----------
+        kpt_red_left, kpt_red_right : ndarray, shape (N, 3) and (M, 3)
+            k-points in reduced coordinates.
+        u_left, u_right : ndarray, shape (N, NW) and (M, NW), optional
+            Wavefunction columns U_K[:, iband] for band projection.
+
+        Returns
+        -------
+        ndarray, shape (N, M) if wavefunctions given, else (N, M, NW, NW)
+        """
         rvectors = self.rvec.iRvec
         exp_left = np.exp(
             2j * np.pi * cached_einsum('Ri,kj->Rk', rvectors, kpt_red_left))
@@ -183,6 +224,19 @@ class ScatteringMatrix:
         return self._multipole_eigenvectors
 
     def multipole_decomposition_RR(self, select_threshold=-1):
+        """Decompose V_ab^{RR'} into eigenmodes (multipoles).
+
+        Reshapes V_ab^{R1 R2} as a square matrix V_{(R1,a),(R2,b)}, then
+        diagonalises: V = Σ_l λ_l |φ_l><φ_l|.  Modes are sorted by |λ_l|
+        and those with |λ_l|/|λ_0| > select_threshold are kept.
+
+        Results are cached as _multipole_eigenvalues and _multipole_eigenvectors.
+
+        Parameters
+        ----------
+        select_threshold : float
+            Relative cutoff; -1 keeps all modes.
+        """
         assert self.Vrrab is not None, "Vrrab is not set, please set it first using set_RR"
         Vrarb = self.Vrrab.transpose(0, 2, 1, 3).reshape(
             self.rvec.nRvec*self.num_wann, self.rvec.nRvec*self.num_wann)

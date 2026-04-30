@@ -3,6 +3,33 @@ from .get_band_wavefunction import get_wavefunction_on_kpoints
 
 
 def get_segments(energy_grid, shifts, below_EF, gradient=False):
+    """Extract Fermi surface segments from one triangulation of the BZ.
+
+    Each triangle defined by `shifts` crosses the Fermi level if exactly 1 or
+    exactly 2 of its 3 vertices are below E_F.  The crossing points on the two
+    edges that straddle E_F form a line segment; its midpoint and integration
+    weight are returned.
+
+    Parameters
+    ----------
+    energy_grid : ndarray, shape (NK1, NK2)
+        Band energies on a uniform k-grid, already shifted so that E_F = 0.
+    shifts : list of 3 (int, int) tuples
+        Grid-index offsets that define the three vertices of each triangle.
+    below_EF : ndarray of bool, shape (NK1, NK2)
+        True where energy_grid < 0.
+    gradient : bool
+        If True, also return the Fermi velocity ∇_k E at each segment midpoint.
+
+    Returns
+    -------
+    gradient=False : (k_center, weight)
+    gradient=True  : (k_center, segments, weight, grad)
+        k_center  : ndarray (N, 2), reduced coordinates of segment midpoints
+        segments  : ndarray (N, 2, 2), endpoints of each segment
+        weight    : ndarray (N,), integration weights ∝ segment length / |∇E|
+        grad      : ndarray (2, N), gradient ∇_k E in Cartesian coordinates
+    """
     NK1, NK2 = energy_grid.shape
 
     x = np.linspace(0, 1, NK1+1, endpoint=True)
@@ -21,8 +48,8 @@ def get_segments(energy_grid, shifts, below_EF, gradient=False):
                                for sh in shifts])
     num_two_below_EF = two_below_EF[0].shape[0]
 
-    # take a minus, because we do not care the sign, but want one
-    # energy below EF, and the other above EF
+    # For two_below_EF triangles flip the sign so the algorithm always sees
+    # exactly one vertex below zero (the isolated one), keeping the same code path.
     E_triangles = np.concatenate([E_one_below_EF, -E_two_below_EF], axis=1).T
     one_or_two_below_EF = np.concatenate([one_below_EF, two_below_EF], axis=1)
     k_triangles = np.array([np.array([xy[one_or_two_below_EF[i] + sh[i]]
@@ -58,12 +85,41 @@ def get_segments(energy_grid, shifts, below_EF, gradient=False):
 
 def get_kpoints_and_weights_FS(energy_grid, reciprocal_lattice_vectors, fermi_level,
                                gradient=False):
+    """Compute Fermi surface k-points and integration weights for one band.
+
+    Tiles the 2D BZ with two complementary triangulations (each covering half
+    the unit cell) and calls `get_segments` on both.  The diagonal direction
+    of the triangulation is chosen to align with the shorter BZ diagonal,
+    which minimises interpolation error for non-orthogonal lattices.
+
+    Parameters
+    ----------
+    energy_grid : ndarray, shape (NK1, NK2)
+        Band energies in eV on a uniform k-grid (reduced coordinates).
+    reciprocal_lattice_vectors : ndarray, shape (2, 2)
+        Rows are the 2D reciprocal lattice vectors in Cartesian coordinates (Å⁻¹).
+    fermi_level : float
+        Fermi energy in eV.
+    gradient : bool
+        If True, also return Fermi velocity ∇_k E for each contour point.
+
+    Returns
+    -------
+    gradient=False : (kpoints, weights)
+    gradient=True  : (kpoints, segments, weights, grad)
+        kpoints  : ndarray (N, 2), reduced coordinates
+        segments : ndarray (N, 2, 2), segment endpoints
+        weights  : ndarray (N,), integration weights
+        grad     : ndarray (N, 2), Fermi velocity in Cartesian coordinates (eV·Å)
+    """
     energy_grid = energy_grid.copy()-fermi_level
 
     below_EF = (energy_grid < 0)
     assert reciprocal_lattice_vectors.shape == (2, 2)
     scal_prod = np.dot(
         reciprocal_lattice_vectors[0], reciprocal_lattice_vectors[1])
+    # Choose the triangulation diagonal that avoids cutting across the obtuse
+    # angle of the BZ parallelogram (minimises triangle aspect ratio).
     if scal_prod >= 0:
         shifts = [[(0, 0), (1, 0), (0, 1)],
                   [(1, 0), (0, 1), (1, 1)]]
@@ -95,6 +151,31 @@ def get_contours_and_WFs(
     return_empty=False,
     ignore_existing=False,
 ):
+    """Compute Fermi surface contours and Bloch wavefunctions for all bands and Fermi levels.
+
+    For each (band, Fermi level) pair, extracts the 2D Fermi surface contour
+    and optionally evaluates the Wannier-interpolated wavefunction U_k at each
+    contour k-point.  Results are saved to `contours_db` and optionally returned
+    as a dictionary keyed by (band_index, Fermi_level).
+
+    Parameters
+    ----------
+    Efermi_list : array-like of float, optional
+        Fermi energies (eV) to process.  Defaults to `Nfermi` values spanning
+        the full energy range of the grid.
+    Nfermi : int
+        Number of Fermi levels when `Efermi_list` is not provided.
+    return_dict : bool
+        If True, return a dict {(ib, EF): data}.
+    get_wf : bool
+        If True, compute and store wavefunctions alongside the contour k-points.
+    contours_db : ContourDatabase
+        Database used for reading the energy grid and writing results.
+    return_empty : bool
+        If True, include entries for bands with no Fermi surface at a given EF.
+    ignore_existing : bool
+        If True, recompute contours even when they already exist in the database.
+    """
     energies_grid, rec_lattice = contours_db.get_E_grid()
     system = contours_db.system
     if Efermi_list is None:

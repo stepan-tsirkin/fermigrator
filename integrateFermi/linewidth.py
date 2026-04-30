@@ -32,6 +32,14 @@ def get_linewidth_Efermi(contours_db, EF):
     return linewidth_dict
 
 
+def getDOS(contours_db, EF):
+    files_contour = contours_db.get_files_Efermi("contour", EF)
+    dos = 0
+    for file_contour in files_contour:
+        contour = np.load(file_contour)
+        dos += np.sum(contour["weights"])
+    return dos
+
 def get_linewidth_multipole_Efermi(contours_db, EF):
     linewidths_dict = {}
     files_contour = contours_db.get_files_Efermi("contour", EF)

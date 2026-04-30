@@ -1,5 +1,6 @@
 from integrateFermi.scattering_matrix import ScatteringMatrix, get_chk
 from integrateFermi.database import ContourDatabase
+from ase.units import Hartree
 
 import numpy as np
 
@@ -12,7 +13,7 @@ for k in ["fermi", "cell", "nspin", "wannier_centres"]:
 
 # in the archive, spin is a slow index, but in the system it is a fast index
 reorder = [0,2,1,3]
-Vkk = elements["V_total"][:,:,reorder,:][:,:,:,reorder]
+Vkk = elements["V_total"][:,:,reorder,:][:,:,:,reorder] * Hartree
 
 db = ContourDatabase.read("contours")
 system = db.system

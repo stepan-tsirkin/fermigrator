@@ -152,7 +152,7 @@ class ScatteringMatrix:
             ib2 = contours_db.split_filename(file2)["ib"]
             EF1 = contours_db.split_filename(file1)["EF"]
             EF2 = contours_db.split_filename(file2)["EF"]
-            assert EF1 == EF2, f"Fermi levels in the two contour files do not match: {EF1} and {EF2} diff is {EF1-EF2}"
+            assert EF1 == EF2, f"Fermi levels in the two contour files do not match: {EF1} and {EF2} diff is {float(EF1)-float(EF2)}"
             contours_db.set_data("Vkk", dict(Vkk=V_on_contours),
                                  ib1=ib1, ib2=ib2, EF=EF1)
         return V_on_contours
@@ -268,7 +268,7 @@ def bloch2wann(Vkkmn,
     Vkkab_w = np.zeros(
         (num_kpts, num_kpts, num_bands, nspin, chk.num_wann, nspin), dtype=complex)
     for ik in range(num_kpts):
-        Vkkab_w[ :, ik :, :, :, :] = cached_einsum(
+        Vkkab_w[:, ik, :, :, :] = cached_einsum(
             'kisjt,jb->kisbt', Vkkmn[:, ik], chk.v_matrix[ik])
     Vkkab_wan = np.zeros(
         (num_kpts, chk.num_kpts, chk.num_wann, nspin, chk.num_wann, nspin), dtype=complex)

@@ -100,7 +100,7 @@ class ContourDatabase:
 
     def get_all_bands(self, Efermi=None):
         if Efermi is None:
-            return set.union([self.get_all_bands_Efermi(Efermi) for Efermi in self.get_all_Efermi()])
+            return set.union(*[self.get_all_bands(Efermi) for Efermi in self.get_all_Efermi()])
         else:
             band_set = set()
             for key in self.files_dicts.get("contour", {}).keys():

@@ -76,10 +76,11 @@ def get_kpoints_and_weights_FS(energy_grid, reciprocal_lattice_vectors, fermi_le
     res2 = get_segments(
         energy_grid, shifts=shifts[1], below_EF=below_EF, gradient=gradient)
     kpoints = np.vstack([res1[0], res2[0]])
+    if not gradient:
+        weights = np.concatenate([res1[1], res2[1]], axis=0)
+        return kpoints, weights
     weights = np.concatenate([res1[2], res2[2]], axis=0)
     segments = np.concatenate([res1[1], res2[1]], axis=0)
-    if not gradient:
-        return kpoints, weights
     grad = np.hstack((res1[3], res2[3]))
     grad = np.dot(np.linalg.inv(reciprocal_lattice_vectors), grad)
     return kpoints, segments, weights, grad.T

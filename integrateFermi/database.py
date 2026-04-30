@@ -16,9 +16,20 @@ class ContourDatabase:
     file_types = ["contour", "vertex", "energies_grid", "Vkk", "linewidth"]
 
     def __init__(self, path, num_digits_Efermi=5, num_digits_band=4):
+        """Create a new database directory.
+
+        Parameters
+        ----------
+        path : str
+            Directory to create (or reuse).  A ``metadata.npz`` is written
+            immediately so precision settings survive across sessions.
+        num_digits_Efermi : int
+            Decimal places used when formatting Fermi energies in filenames.
+        num_digits_band : int
+            Zero-padded width for band indices in filenames.
+        """
         self.path = path
         os.makedirs(self.path, exist_ok=True)
-        # self.read(path)
         self.num_digits_Efermi = num_digits_Efermi
         self.num_digits_band = num_digits_band
         self.files_dicts = {}
@@ -27,6 +38,7 @@ class ContourDatabase:
 
     @classmethod
     def read(cls, path):
+        """Open an existing database, restoring precision settings from metadata.npz."""
         metadata = np.load(os.path.join(path, "metadata.npz"))
         num_digits_Efermi = int(metadata["num_digits_Efermi"])
         num_digits_band = int(metadata["num_digits_band"])
@@ -35,12 +47,14 @@ class ContourDatabase:
         return instance
 
     def format_EF(cls, Efermi):
+        """Format a Fermi energy as a fixed-width signed string for use in filenames."""
         if isinstance(Efermi, str):
             Efermi = float(Efermi)
         Efermi = round(Efermi, cls.num_digits_Efermi)
         return f"{Efermi:+.{cls.num_digits_Efermi}f}"
 
     def format_band(cls, band):
+        """Format a band index as a zero-padded string for use in filenames."""
         return f"{int(band):0{cls.num_digits_band}d}"
 
     def format(self, key, value):
@@ -53,6 +67,12 @@ class ContourDatabase:
 
     @classmethod
     def split_filename(cls, filename):
+        """Parse a database filename into a dict of its key=value components.
+
+        Example: ``contour_ib=0001_EF=+0.12345.npz`` →
+        ``{"type": "contour", "ib": "0001", "EF": "+0.12345"}``.
+        Values are returned as strings; callers must cast as needed.
+        """
         base = os.path.basename(filename).split(".npz")[0]
         parts = base.split("_")
         res = {}
@@ -84,10 +104,15 @@ class ContourDatabase:
             return None
 
     def set_data(self, typ, data, **kwargs):
+        """Save a dict of arrays to the corresponding .npz file."""
         filename = self.get_filename(typ, **kwargs)
         np.savez(filename, **data)
 
     def get_data(self, typ, none_if_missing=True, **kwargs):
+        """Load a .npz file and return its contents as a plain dict.
+
+        Returns None (or raises FileNotFoundError) if the file does not exist.
+        """
         filename = self.get_filename(typ, **kwargs)
         if os.path.exists(filename):
             f = np.load(filename)
@@ -99,6 +124,7 @@ class ContourDatabase:
                 raise FileNotFoundError(f"File not found: {filename}")
 
     def get_all_Efermi(self):
+        """Return the set of Fermi energy strings present in the database (from contour files)."""
         Efermi_set = set()
         for fname in glob.glob(os.path.join(self.path, f"contour_*.npz")):
             EF = self.split_filename(fname)["EF"]
@@ -106,6 +132,11 @@ class ContourDatabase:
         return Efermi_set
 
     def get_all_bands(self, Efermi=None):
+        """Return the set of band indices stored in the database.
+
+        If `Efermi` is given, restrict to files matching that Fermi level;
+        otherwise return the union over all Fermi levels.
+        """
         if Efermi is None:
             return set.union(*[self.get_all_bands(Efermi) for Efermi in self.get_all_Efermi()])
         else:
@@ -122,6 +153,7 @@ class ContourDatabase:
             return band_set
 
     def get_files_Efermi(self, typ, Efermi):
+        """Return all file paths of a given type matching `Efermi`."""
         file_list = []
         for fname in glob.glob(os.path.join(self.path, f"{typ}_*.npz")):
             info = self.split_filename(fname)
@@ -142,6 +174,16 @@ class ContourDatabase:
                 "Energies grid not found in database. Please run evaluate_E_grid to compute and save it.")
 
     def evaluate_E_grid(self, grid, ignore_existing=False):
+        """Compute band energies on a k-grid using WannierBerri and save to the database.
+
+        Parameters
+        ----------
+        grid : Grid or int or tuple/list/ndarray or dict
+            The k-grid to use.  An int ``N`` → (N, N, 1); a 2-tuple → (N1, N2, 1);
+            a dict is passed as kwargs to ``wannierberri.Grid``.
+        ignore_existing : bool
+            If False (default), return the cached result when one already exists.
+        """
         if not ignore_existing:
             data = self.get_data("energies_grid")
             if data is not None:
@@ -173,6 +215,7 @@ class ContourDatabase:
         return {"energies": energies_grid, "rec_lattice": rec_lattice}
 
     def set_system(self, system):
+        """Serialise a WannierBerri System_R to the database directory and cache it."""
         system.to_npz(os.path.join(self.path, "system"))
         self._system = system
 

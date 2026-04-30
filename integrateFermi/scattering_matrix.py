@@ -167,18 +167,31 @@ class ScatteringMatrix:
             2j * np.pi * cached_einsum('Ri,kj->Rk', rvectors, kpt_red_left))
         exp_right = np.exp(-2j * np.pi *
                            cached_einsum('Ri,kj->Rk', rvectors, kpt_red_right))
-        Vkkab = cached_einsum('Rk, Rrab, rq->kqab',
-                              exp_left, self.Vrrab, exp_right)
         assert (u_left is None) == (
             u_right is None), "u_left and u_right must be both None or both not None"
         if u_left is not None:
-            # TODO - is we combine with the previous - will it be faster?
-            return cached_einsum('ka,kqab,qb->kq', u_left.conj(), Vkkab, u_right)
+            return cached_einsum('ka,Rk,Rrab,rq,qb->kq',
+                                 u_left.conj(), exp_left, self.Vrrab, exp_right, u_right)
         else:
+            Vkkab = cached_einsum('Rk, Rrab, rq->kqab',
+                                  exp_left, self.Vrrab, exp_right)
             return Vkkab
 
-    def get_Vkk_on_contours(self, file1, file2,
-                            contours_db=None,):
+    def get_Vkk_on_contours(self, file1, file2, contours_db=None):
+        """Evaluate band matrix elements V_{m n}(k, k') between two contour files.
+
+        Loads k-points and wavefunctions from `file1` (left) and `file2` (right),
+        calls `get_on_kpoints`, and optionally saves the result to `contours_db`
+        as a ``Vkk`` entry keyed by (ib1, ib2, EF).
+
+        Parameters
+        ----------
+        file1, file2 : str
+            Paths to contour .npz files (must contain ``kpoints`` and ``wavefunctions``).
+        contours_db : ContourDatabase, optional
+            If provided, the result is saved and the band/EF labels are read from
+            the filenames.
+        """
         with np.load(file1) as f1:
             kpoints1 = f1["kpoints"]
             wavefunctions1 = f1["wavefunctions"]
@@ -199,6 +212,7 @@ class ScatteringMatrix:
         return V_on_contours
 
     def get_Vkk_on_contours_all(self, contours_db, Efermi_list=None):
+        """Compute and save V_{mn}(k,k') for all band pairs at each Fermi level."""
         if Efermi_list is None:
             Efermi_list = contours_db.get_all_Efermi()
         print(
@@ -254,8 +268,28 @@ class ScatteringMatrix:
             nselect, self.rvec.nRvec, self.num_wann)
         return self._multipole_eigenvalues, self._multipole_eigenvectors
 
-    def get_multipole_on_contour(self, file,
-                                 contours_db=None):
+    def get_multipole_on_contour(self, file, contours_db=None):
+        """Project multipole eigenmodes onto a Fermi surface contour.
+
+        For each eigenmode φ_l with eigenvalue λ_l, evaluates the overlap
+        with the Bloch wavefunctions on the contour:
+
+            W_l(k) = Σ_{R,a} φ_l^{Ra} e^{-ik·R} u_a(k)
+
+        and computes two quantities saved under ``multipole-vertex``:
+
+        - ``vertex[l, m]``    = Σ_k W_l*(k) w(k) W_m(k) λ_m
+          (weighted overlap used in linewidth summations over k')
+        - ``projector[k,l,m]``= W_l*(k) W_m(k) λ_m
+          (k-resolved factor used when computing Γ(k) for a fixed k)
+
+        Parameters
+        ----------
+        file : str
+            Path to a contour .npz file (must contain kpoints, wavefunctions, weights).
+        contours_db : ContourDatabase, optional
+            If provided, results are saved under the ``multipole-vertex`` type.
+        """
         with np.load(file) as f:
             kpoints = f["kpoints"]
             wavefunctions = f["wavefunctions"]
@@ -277,6 +311,7 @@ class ScatteringMatrix:
         return vertex, projector
 
     def get_multipole_on_contours_all(self, contours_db, Efermi_list=None):
+        """Compute and save multipole vertex/projector for all contours at each Fermi level."""
         if Efermi_list is None:
             Efermi_list = contours_db.get_all_Efermi()
         print(
@@ -332,6 +367,12 @@ def bloch2wann(Vkkmn,
     return Vkkab_wan
 
 def get_chk(chk):
+    """Load a Wannier90 checkpoint as a WannierBerri CheckPoint object.
+
+    Accepts a CheckPoint instance (returned as-is), a path ending in ``.chk``
+    (loaded via wannier90 binary format), or a path ending in ``.npz``
+    (loaded from a previously serialised checkpoint).
+    """
     if chk is None:
         return None
     from wannierberri.w90files.chk import CheckPoint

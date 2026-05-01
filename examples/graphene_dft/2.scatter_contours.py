@@ -26,6 +26,8 @@ scatter = ScatteringMatrix.from_Vkk(Vkkmn_wan=Vkk,
                                     wannier_centers_red=system.wannier_centers_red,
 )
 
+print (f"scatter iRvec shape: {scatter.rvec.iRvec.shape}")
+
 scatter.get_Vkk_on_contours_all(contours_db=db)
 
 scatter.get_multipole_on_contours_all(contours_db=db)

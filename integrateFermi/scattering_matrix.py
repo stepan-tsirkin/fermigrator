@@ -292,8 +292,7 @@ class ScatteringMatrix:
         v = self.multipole_eigenvectors
         e = self.multipole_eigenvalues
 
-        exp = np.exp(-2j * np.pi * cached_einsum('Ri,kj->Rk',
-                     self.rvec.iRvec, kpoints))
+        exp = np.exp(-2j * np.pi * self.rvec.iRvec[:,:2] @ kpoints.T)
         W = cached_einsum('lRa, Rk, ka -> lk', v, exp, wavefunctions)
         vertex = cached_einsum('lk, k, mk , m-> lm', W.conj(), weight, W, e)
         projector = cached_einsum('lk, mk, m -> klm', W.conj(), W, e)

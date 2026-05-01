@@ -26,8 +26,11 @@ class Rvectors2(Rvectors):
         Computes the inverse Fourier transform:
         V_{ab}(k, k') = Σ_{R,R'} e^{ik·R} V_ab^{RR'} e^{-ik'·R'}
         """
-        exp_left = np.exp(2j * np.pi * self.iRvec @ kpt_red_left.T)
-        exp_right = np.exp(-2j * np.pi * self.iRvec @ kpt_red_right.T)
+        dim_k_left = kpt_red_left.shape[1]
+        dim_k_right = kpt_red_right.shape[1]
+        # print (f"RR_to_kk: AA_RR shape {AA_RR.shape}, kpt_red_left shape {kpt_red_left.shape}, kpt_red_right shape {kpt_red_right.shape}")
+        exp_left = np.exp(2j * np.pi * self.iRvec[:, :dim_k_left] @ kpt_red_left.T)
+        exp_right = np.exp(-2j * np.pi * self.iRvec[:, :dim_k_right] @ kpt_red_right.T)
         return cached_einsum('Rk, Rr..., rq->kq...', exp_left, AA_RR, exp_right)
 
 
@@ -69,7 +72,7 @@ class Rvectors2(Rvectors):
                     ic = 0 if self.nshifts_left == 1 else c
                     ishift1 = self.shift_index[ic, ia]
                     ishift2 = self.shift_index[ic, ib]
-                    print(f"a,b,c = {a},{b},{c} : {ishift1}, {ishift2}")
+                    # print(f"a,b,c = {a},{b},{c} : {ishift1}, {ishift2}")
                     for iRi1, iRm1, nd1 in zip(self.iRvec_index_list[ishift1],
                                             self.iRvec_mod_list[ishift1],
                                             self.Ndegen_list[ishift1]):

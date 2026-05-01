@@ -83,6 +83,7 @@ def getDOS(contours_db, EF):
         dos += np.sum(contour["weights"])
     return dos
 
+
 def get_linewidth_multipole_Efermi(contours_db, EF):
     """Compute linewidths using the multipole decomposition of the scattering vertex.
 

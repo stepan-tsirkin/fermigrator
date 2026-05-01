@@ -24,7 +24,7 @@ class ScatteringMatrix:
             diff = Vrrab - Vrrab.transpose(1, 0, 3, 2).conj()
             max_diff = np.max(np.abs(diff))
             assert max_diff < 1e-10, f"Vrrab is not Hermitian, max difference is {max_diff}, which may indicate that the transformation from Vkkmn to Vrrab is not correct or that the input Vkkmn is not correct"
-        
+
         elif num_wann is not None:
             self.Vrrab = np.zeros(
                 (rvec.nRvec, rvec.nRvec, num_wann, num_wann), dtype=complex)
@@ -75,7 +75,7 @@ class ScatteringMatrix:
             rvectors.set_Rvec(mp_grid=mp_grid)
             rvectors.set_fft_q_to_R(kpt_red=kpt_red)
 
-        Vabcrr = rvectors.qq_to_RR(Vkkmn_wan[:, :, :, :, None]) 
+        Vabcrr = rvectors.qq_to_RR(Vkkmn_wan[:, :, :, :, None])
         Vrrab = Vabcrr[:, :, 0, :, :].transpose(2, 3, 0, 1)
         return cls(rvec=rvectors, Vrrab=Vrrab)
 
@@ -90,7 +90,7 @@ class ScatteringMatrix:
 
     def as_dict(self):
         dict = {}
-        for key in ["center_red",  "Vrrab",
+        for key in ["center_red", "Vrrab",
                     "_multipole_eigenvalues", "_multipole_eigenvectors"]:
             if hasattr(self, key):
                 if getattr(self, key) is not None:
@@ -118,7 +118,7 @@ class ScatteringMatrix:
                 else:
                     num_wann = 0
         if "iRvec" in dict:
-            self.rvec = Rvectors(
+            self.rvec = Rvectors2(
                 iRvec=dict["iRvec"],
                 lattice=dict["real_lattice"],
                 shifts_left_red=[
@@ -200,7 +200,7 @@ class ScatteringMatrix:
             ib2 = contours_db.split_filename(file2)["ib"]
             EF1 = contours_db.split_filename(file1)["EF"]
             EF2 = contours_db.split_filename(file2)["EF"]
-            assert EF1 == EF2, f"Fermi levels in the two contour files do not match: {EF1} and {EF2} diff is {float(EF1)-float(EF2)}"
+            assert EF1 == EF2, f"Fermi levels in the two contour files do not match: {EF1} and {EF2} diff is {float(EF1) - float(EF2)}"
             contours_db.set_data("Vkk", dict(Vkk=V_on_contours),
                                  ib1=ib1, ib2=ib2, EF=EF1)
         return V_on_contours
@@ -247,14 +247,14 @@ class ScatteringMatrix:
         """
         assert self.Vrrab is not None, "Vrrab is not set, please set it first using set_RR"
         Vrarb = self.Vrrab.transpose(0, 2, 1, 3).reshape(
-            self.rvec.nRvec*self.num_wann, self.rvec.nRvec*self.num_wann)
+            self.rvec.nRvec * self.num_wann, self.rvec.nRvec * self.num_wann)
         e, v = np.linalg.eigh(Vrarb)
         srt = np.argsort(-abs(e))
         e = e[srt]
         if e[0] < 1e-15:
             print("Warning: the largest eigenvalue is smaller than 1e-15, which may indicate that the scattering matrix is not properly set or that the system is very weakly scattering")
             return np.zeros(0), np.zeros((0, self.rvec.nRvec, self.num_wann))
-        nselect = max(np.where(e/e[0] > select_threshold)[0]+1)
+        nselect = max(np.where(e / e[0] > select_threshold)[0] + 1)
         e = e[:nselect]
         v = v[:, srt[:nselect]]
         self._multipole_eigenvalues = e
@@ -292,7 +292,7 @@ class ScatteringMatrix:
         v = self.multipole_eigenvectors
         e = self.multipole_eigenvalues
 
-        exp = np.exp(-2j * np.pi * self.rvec.iRvec[:,:2] @ kpoints.T)
+        exp = np.exp(-2j * np.pi * self.rvec.iRvec[:, :2] @ kpoints.T)
         W = cached_einsum('lRa, Rk, ka -> lk', v, exp, wavefunctions)
         vertex = cached_einsum('lk, k, mk , m-> lm', W.conj(), weight, W, e)
         projector = cached_einsum('lk, mk, m -> klm', W.conj(), W, e)
@@ -318,7 +318,7 @@ class ScatteringMatrix:
 
 
 def bloch2wann(Vkkmn,
-               chk, 
+               chk,
                nspin=1,
                selected_bands=None):
     """
@@ -327,14 +327,14 @@ def bloch2wann(Vkkmn,
     Parameters
     ----------
     Vkkmn : array_like
-        The scattering matrix in the Bloch gauge, with shape (NK, NK, NB, NB) (nspin=1) 
+        The scattering matrix in the Bloch gauge, with shape (NK, NK, NB, NB) (nspin=1)
         or (nspin, NK, NK, NB, 2, NB, 2) (nspin=2)
     chk : CheckPoint or str
         The checkpoint file (from wannier90 or wannierberri)
     nspin : int, optional
-        The number of spins, 1 or 2  (nspin=2 assumes that chk is spinless, but the scattering matrix 
+        The number of spins, 1 or 2  (nspin=2 assumes that chk is spinless, but the scattering matrix
         depends on spin)
-    
+
     """
     kpt_red = chk.kpt_red
     num_kpts = kpt_red.shape[0]
@@ -342,7 +342,8 @@ def bloch2wann(Vkkmn,
     if nspin == 1:
         Vkkmn = Vkkmn[:, :, :, None, :, None]
     if selected_bands is not None:
-        Vkkmn = Vkkmn[:, :, selected_bands, :, :, :][:, :, :, :, selected_bands, :]
+        Vkkmn = Vkkmn[:, :, selected_bands, :,
+                      :, :][:, :, :, :, selected_bands, :]
     num_bands = Vkkmn.shape[2]
     assert chk.num_kpts == num_kpts, f"Number of k-points in the scattering matrix ({num_kpts}) does not match the number of k-points in the checkpoint ({chk.num_kpts})"
     assert chk.num_bands == num_bands, f"Number of bands in the scattering matrix ({num_bands}) does not match the number of bands in the checkpoint ({chk.num_bands})"
@@ -358,6 +359,7 @@ def bloch2wann(Vkkmn,
         Vkkab_wan[ik, :, :, :] = cached_einsum(
             'kisbt,ia->kasbt', Vkkab_w[ik, :, :, :], chk.v_matrix[ik, :].conj())
     return Vkkab_wan
+
 
 def get_chk(chk):
     """Load a Wannier90 checkpoint as a WannierBerri CheckPoint object.
@@ -376,4 +378,5 @@ def get_chk(chk):
             return CheckPoint.from_w90_file(chk[:-4])
         elif chk.endswith(".npz"):
             return CheckPoint.from_npz(chk)
-    raise ValueError(f"chk should be either a CheckPoint object or a string ending with .chk or .npz, but got  type {type(chk)} and value {chk}")
+    raise ValueError(
+        f"chk should be either a CheckPoint object or a string ending with .chk or .npz, but got  type {type(chk)} and value {chk}")

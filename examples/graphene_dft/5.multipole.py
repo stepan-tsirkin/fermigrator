@@ -1,6 +1,6 @@
 
-from integrateFermi.scattering import (get_contour_files_Efermi, 
-                                       get_linewidth_multipole_Efermi, 
+from integrateFermi.scattering import (get_contour_files_Efermi,
+                                       get_linewidth_multipole_Efermi,
                                        get_all_Fermi_levels)
 from matplotlib import pyplot as plt
 from wannierberri import System_R
@@ -20,14 +20,16 @@ ncols = 4
 nrows = nfermi // ncols
 if nfermi % ncols != 0:
     nrows += 1
-fig, axes = plt.subplots(nrows, ncols, figsize=(6*ncols, 6*nrows), layout="tight")
+fig, axes = plt.subplots(nrows, ncols, figsize=(
+    6*ncols, 6*nrows), layout="tight")
 for i, Efermi in enumerate(sorted(linewidth_dict.keys())):
-    ax = axes[i//ncols, i%ncols]
+    ax = axes[i//ncols, i % ncols]
     for ib, lw in linewidth_dict[Efermi].items():
         contour = get_contour_files_Efermi(path, Efermi, ib=ib)[0]
         kpoints = np.load(contour)["kpoints"]
         kpoints_cart = kpoints @ recip_lattice
-        sc = ax.scatter(kpoints_cart[:, 0], kpoints_cart[:, 1], c=lw, cmap="viridis", s=20)
+        sc = ax.scatter(
+            kpoints_cart[:, 0], kpoints_cart[:, 1], c=lw, cmap="viridis", s=20)
         # make colorbar smaller and to the right of the plot and colorscale from min to max of lw
         vmin, vmax = np.min(lw), np.max(lw)
         sc.set_clim(vmin, vmax)
@@ -42,15 +44,15 @@ for i, Efermi in enumerate(sorted(linewidth_dict.keys())):
 
 # remove empty subplots
 for j in range(i+1, nrows*ncols):
-    fig.delaxes(axes[j//ncols, j%ncols])
-    
+    fig.delaxes(axes[j//ncols, j % ncols])
+
 plt.savefig("linewidths.png")
 plt.close()
 x = []
 y = []
 for i, Efermi in enumerate(sorted(linewidth_dict.keys())):
     for ib, lw in linewidth_dict[Efermi].items():
-        if np.mean(lw) <100000:
+        if np.mean(lw) < 100000:
             x.append(Efermi)
             y.append(np.mean(lw))
 plt.plot(x, y, "o-")

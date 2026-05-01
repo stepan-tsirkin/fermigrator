@@ -85,7 +85,7 @@ class ContourDatabase:
     def get_filename(self, typ, **kwargs):
         lst = [typ] + \
             [f"{k}={self.format(k, kwargs[k])}" for k in sorted(kwargs.keys())]
-        return os.path.join(self.path, "_".join(lst)+".npz")
+        return os.path.join(self.path, "_".join(lst) + ".npz")
 
     def get_contour_filename(self, ib, Efermi):
         return self.get_filename("contour", ib=ib, EF=self.format_EF(Efermi))
@@ -126,7 +126,7 @@ class ContourDatabase:
     def get_all_Efermi(self):
         """Return the set of Fermi energy strings present in the database (from contour files)."""
         Efermi_set = set()
-        for fname in glob.glob(os.path.join(self.path, f"contour_*.npz")):
+        for fname in glob.glob(os.path.join(self.path, "contour_*.npz")):
             EF = self.split_filename(fname)["EF"]
             Efermi_set.add(EF)
         return Efermi_set

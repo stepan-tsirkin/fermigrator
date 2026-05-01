@@ -1,10 +1,10 @@
+from integrateFermi.database import ContourDatabase
 import numpy as np
 from integrateFermi.contours2D import get_contours_and_WFs
 import wannierberri as wb
 import ray
 ray.init()
 
-from integrateFermi.database import ContourDatabase
 try:
     db = ContourDatabase.read("contours")
 except FileNotFoundError:

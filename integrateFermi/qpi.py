@@ -80,7 +80,7 @@ def cut_boundary(contour, indices, axis, side):
         boundary_value = 0
         shift[axis] = 1
     elif side == "upper":
-        select = np.where(contour[:, 1, axis] > 1+epsilon)[0]
+        select = np.where(contour[:, 1, axis] > 1 + epsilon)[0]
         boundary_value = 1
         shift[axis] = -1
     else:
@@ -94,7 +94,7 @@ def cut_boundary(contour, indices, axis, side):
         assert 0 <= t < 1
         intersection_point = p1 + t * (p2 - p1)
         contour[i, 1, :] = intersection_point
-        new_segments.append([intersection_point+shift, p2+shift])
+        new_segments.append([intersection_point + shift, p2 + shift])
         new_indices.append(index_original)
     if len(new_segments) > 0:
         indices = np.hstack((indices, new_indices))
@@ -117,10 +117,10 @@ def shift_contour_mod1(contour, q):
     Returns
     -------
     np.array (M, 2, 2)
-        An array of shape (M, 2, 2) where each row represents a segment of the shifted contour in the format [[x1, y1],[ x2, y2]]. 
+        An array of shape (M, 2, 2) where each row represents a segment of the shifted contour in the format [[x1, y1],[ x2, y2]].
         M >= N, as some segments may be split into multiple segments if they cross the boundary of the unit square.
     np.array (M, dtype=int)
-        Indices if the original segments that correspond to the shifted segments. 
+        Indices if the original segments that correspond to the shifted segments.
         Starts with 0,1,..N-1, and if a segment is split into multiple segments, the same index will be repeated for those segments.
     """
     contour = np.copy(contour)

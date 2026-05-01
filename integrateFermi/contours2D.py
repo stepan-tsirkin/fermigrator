@@ -32,19 +32,19 @@ def get_segments(energy_grid, shifts, below_EF, gradient=False):
     """
     NK1, NK2 = energy_grid.shape
 
-    x = np.linspace(0, 1, NK1+1, endpoint=True)
-    y = np.linspace(0, 1, NK2+1, endpoint=True)
+    x = np.linspace(0, 1, NK1 + 1, endpoint=True)
+    y = np.linspace(0, 1, NK2 + 1, endpoint=True)
 
     below_EF_roll = np.array([np.roll(below_EF, (-sh[0], -sh[1]), axis=(0, 1))
                               for sh in shifts])
     one_below_EF = np.where(np.sum(below_EF_roll, axis=0) == 1)
-    E_one_below_EF = np.array([energy_grid[(one_below_EF[0]+sh[0]) % NK1,
-                                           (one_below_EF[1]+sh[1]) % NK2]
+    E_one_below_EF = np.array([energy_grid[(one_below_EF[0] + sh[0]) % NK1,
+                                           (one_below_EF[1] + sh[1]) % NK2]
                                for sh in shifts])
 
     two_below_EF = np.where(np.sum(below_EF_roll, axis=0) == 2)
-    E_two_below_EF = np.array([energy_grid[(two_below_EF[0]+sh[0]) % NK1,
-                                           (two_below_EF[1]+sh[1]) % NK2]
+    E_two_below_EF = np.array([energy_grid[(two_below_EF[0] + sh[0]) % NK1,
+                                           (two_below_EF[1] + sh[1]) % NK2]
                                for sh in shifts])
     num_two_below_EF = two_below_EF[0].shape[0]
 
@@ -59,22 +59,22 @@ def get_segments(energy_grid, shifts, below_EF, gradient=False):
     E_triangles = np.take_along_axis(E_triangles, srt, axis=1)
     k_triangles = np.array([np.take_along_axis(k, srt, axis=1)
                            for k in k_triangles])
-    kappa = [(k_triangles[:, :, 0] +
-              (-E_triangles[:, 0]) /
-              (E_triangles[:, i]-E_triangles[:, 0])[None, :]
-              * (k_triangles[:, :, i]-k_triangles[:, :, 0])) for i in (1, 2)]
+    kappa = [(k_triangles[:, :, 0]
+              + (-E_triangles[:, 0]) /
+              (E_triangles[:, i] - E_triangles[:, 0])[None, :]
+              * (k_triangles[:, :, i] - k_triangles[:, :, 0])) for i in (1, 2)]
     k_center = (kappa[0] + kappa[1]) / 2
     k_center = k_center.T
     segments = np.array(kappa).transpose(2, 0, 1)
 
     weight = 2 * (-E_triangles[:, 0]) / ((E_triangles[:, 1] -
-                                          E_triangles[:, 0]) * (E_triangles[:, 2]-E_triangles[:, 0]))
-    weight = weight / (2*NK1*NK2)
+                                          E_triangles[:, 0]) * (E_triangles[:, 2] - E_triangles[:, 0]))
+    weight = weight / (2 * NK1 * NK2)
     if not gradient:
         return k_center, weight
 
     def cyclic_sum(arr1, arr2):
-        return sum(arr1[:, i] * (arr2[:, (i+1) % 3] - arr2[:, (i+2) % 3]) for i in range(3))
+        return sum(arr1[:, i] * (arr2[:, (i + 1) % 3] - arr2[:, (i + 2) % 3]) for i in range(3))
     denominator = cyclic_sum(k_triangles[0], k_triangles[1])
     grad = np.array([cyclic_sum(E_triangles, k_triangles[1]),
                      -cyclic_sum(E_triangles, k_triangles[0])]) / denominator[None, :]
@@ -112,7 +112,7 @@ def get_kpoints_and_weights_FS(energy_grid, reciprocal_lattice_vectors, fermi_le
         weights  : ndarray (N,), integration weights
         grad     : ndarray (N, 2), Fermi velocity in Cartesian coordinates (eV·Å)
     """
-    energy_grid = energy_grid.copy()-fermi_level
+    energy_grid = energy_grid.copy() - fermi_level
 
     below_EF = (energy_grid < 0)
     assert reciprocal_lattice_vectors.shape == (2, 2)

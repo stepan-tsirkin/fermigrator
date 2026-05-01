@@ -82,7 +82,7 @@ for method in ["direct",]:# "multipole"]:
     print (f"Integral of DOS over Efermi: {dos_sum:.2f} states/unit cell")
 
     axes.plot(x, y, "o", label="Linewidth")
-    axes.plot(x, (dos*V0**2)/4, "x", label=f"DOS*V0^2/4") 
+    axes.plot(x, (dos*V0**2)/4, "x", label=f"DOS*V0^2/4, V0={V0} eV") 
     axes.set_xlabel(r"$E-E_F$ (eV)")
     axes.set_ylabel("Average linewidth")
     axes.grid()

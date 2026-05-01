@@ -6,6 +6,12 @@ from wannierberri.utility import cached_einsum
 
 class Rvectors2(Rvectors):
 
+    @classmethod
+    def from_Rvectors(cls, Rvecs):
+        self = cls.__new__(cls)
+        self.__dict__.update(Rvecs.__dict__)
+        return self
+
     def qq_to_RR(self, AA_qq):
         assert self.fft_q2R_set, "FFT_q_to_R is not set, please set it first using set_fft_q_to_R"
         shapeA = AA_qq.shape[2:]  # remember the shapes after q

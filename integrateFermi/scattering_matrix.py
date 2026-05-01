@@ -16,7 +16,7 @@ class ScatteringMatrix:
 
     def __init__(self, rvec, Vrrab=None, num_wann=None,
                  ):
-        self.rvec = rvec
+        self.rvec = Rvectors2.from_Rvectors(rvec)
         if Vrrab is not None:
             self.Vrrab = Vrrab
             assert Vrrab.shape == (rvec.nRvec, rvec.nRvec, self.num_wann,

@@ -1,5 +1,5 @@
 from matplotlib import pyplot as plt
-from integrateFermi.scattering_matrix import ScatteringMatrix
+from fermigrator.scattering_matrix import ScatteringMatrix
 from wannierberri.w90files import WannierData
 from ase.units import Hartree
 

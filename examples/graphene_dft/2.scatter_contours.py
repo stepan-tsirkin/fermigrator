@@ -1,5 +1,5 @@
-from integrateFermi.scattering_matrix import ScatteringMatrix, get_chk
-from integrateFermi.database import ContourDatabase
+from fermigrator.scattering_matrix import ScatteringMatrix, get_chk
+from fermigrator.database import ContourDatabase
 from ase.units import Hartree
 
 import numpy as np
@@ -14,7 +14,7 @@ for k in ["fermi", "cell", "nspin", "wannier_centres"]:
 # in the archive, spin is a slow index, but in the system it is a fast index
 reorder = [0, 2, 1, 3]
 Vkk = elements["V_total"][:, :, reorder, :][:, :, :, reorder] * Hartree
-
+Vkk[:]=1
 db = ContourDatabase.read("contours")
 system = db.system
 print(f"System has {system.num_wann} wannier functions with centers at {system.wannier_centers_red} in reduced coordinates and real lattice vectors {system.real_lattice}")
@@ -25,8 +25,12 @@ scatter = ScatteringMatrix.from_Vkk(Vkkmn_wan=Vkk,
                                     real_lattice=chk.real_lattice,
                                     wannier_centers_red=system.wannier_centers_red,
                                     )
-
+iR0=scatter.rvec.iR0
+print(f"iR0: {iR0}\n R0: {scatter.rvec.iRvec[iR0]}")
 print(f"scatter iRvec shape: {scatter.rvec.iRvec.shape}")
+print(f"scatter for R=R'=0: (real part)\n{scatter.Vrrab[iR0, iR0].real}")
+print(f"scatter for R=R'=0: (imaginary part)\n{scatter.Vrrab[iR0, iR0].imag}")
+exit()
 
 scatter.get_Vkk_on_contours_all(contours_db=db)
 

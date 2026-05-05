@@ -1,6 +1,6 @@
-from integrateFermi.database import ContourDatabase
+from fermigrator.database import ContourDatabase
 import numpy as np
-from integrateFermi.contours2D import get_contours_and_WFs
+from fermigrator.contours2D import get_contours_and_WFs
 import wannierberri as wb
 import ray
 ray.init()

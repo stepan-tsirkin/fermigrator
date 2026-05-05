@@ -1,5 +1,5 @@
 
-from integrateFermi.scattering import (get_contour_files_Efermi,
+from fermigrator.scattering import (get_contour_files_Efermi,
                                        get_linewidth_multipole_Efermi,
                                        get_all_Fermi_levels)
 from matplotlib import pyplot as plt

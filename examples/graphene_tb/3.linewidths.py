@@ -1,6 +1,6 @@
 import numpy as np
-from integrateFermi.database import ContourDatabase
-from integrateFermi.linewidth import getDOS
+from fermigrator.database import ContourDatabase
+from fermigrator.linewidth import getDOS
 from matplotlib import pyplot as plt
 
 EF0 = np.load("efermi.npz")["EF"]
@@ -13,9 +13,9 @@ method = "multipole"  # "direct" or "multipole"
 
 for method in ["direct",]:# "multipole"]:
     if method == "direct":
-        from integrateFermi.linewidth import get_linewidth_Efermi as get_linewidths
+        from fermigrator.linewidth import get_linewidth_Efermi as get_linewidths
     elif method == "multipole":
-        from integrateFermi.linewidth import get_linewidth_multipole_Efermi as get_linewidths
+        from fermigrator.linewidth import get_linewidth_multipole_Efermi as get_linewidths
 
     linewidth_dict = {}
     for Efermi in contour_db.get_all_Efermi():

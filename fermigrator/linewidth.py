@@ -45,8 +45,7 @@ def get_linewidth_Efermi(contours_db, EF):
                 typ="Vkk", ib1=ib2, ib2=ib, EF=EF, none_if_missing=False)["Vkk"]
             assert np.allclose(
                 Vkk, Vkk_conj.conj().T), f"Vkk file for ib1={ib}, ib2={ib2} and Efermi={EF} is not the conjugate transpose of the Vkk file for ib1={ib2}, ib2={ib} and Efermi={EF}, skipping this pair"
-            # linewidth = cached_einsum('kq, q, qk -> k', file_Vkk["Vkk"], contour2["weights"], file_Vkk_conj["Vkk"])
-            linewidth = np.einsum('kq,q,qk->k', Vkk, w, Vkk_conj).real
+            linewidth = cached_einsum('kq,q,qk->k', Vkk, w, Vkk_conj).real
             print(
                 f"Linewidth for ib1={ib}, ib2={ib2} and Efermi={EF} has min {linewidth.min()} and max {linewidth.max()}")
             contours_db.set_data("linewidth", dict(linewidth=linewidth, kpoints=contour1["kpoints"], weights=contour1["weights"]),

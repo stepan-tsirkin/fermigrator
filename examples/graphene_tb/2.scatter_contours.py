@@ -1,5 +1,5 @@
-from integrateFermi.scattering_matrix import ScatteringMatrix, get_chk
-from integrateFermi.database import ContourDatabase
+from fermigrator.scattering_matrix import ScatteringMatrix, get_chk
+from fermigrator.database import ContourDatabase
 
 V0=3
 db = ContourDatabase.read("contours")

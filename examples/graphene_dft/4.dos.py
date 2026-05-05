@@ -1,8 +1,8 @@
 from matplotlib import pyplot as plt
 from wannierberri import Grid, run
 from wannierberri.calculators.static import DOS, CumDOS
-from integrateFermi.database import ContourDatabase
-from integrateFermi.linewidth import getDOS
+from fermigrator.database import ContourDatabase
+from fermigrator.linewidth import getDOS
 import numpy as np
 dos_dict = {}
 

@@ -1,5 +1,5 @@
 """
-integrateFermi - Integration methods for Fermi surfaces from band structure calculations.
+fermigrator - Integration methods for Fermi surfaces from band structure calculations.
 
 This package provides tools for computing and analyzing Fermi surfaces using
 electronic band structure calculations with WannierBerri.

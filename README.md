@@ -1,4 +1,4 @@
-# integrateFermi
+# fermigrator
 
 A Python library for computing Fermi surface contours and scattering matrices for 2D electronic systems, built on top of [WannierBerri](https://wannierberri.org).
 
@@ -23,9 +23,9 @@ Results are stored in a file-based database of `.npz` files (`ContourDatabase`).
 
 ```python
 import wannierberri as wb
-from integrateFermi.database import ContourDatabase
-from integrateFermi.contours2D import get_contours_and_WFs
-from integrateFermi.scattering_matrix import ScatteringMatrix, get_chk
+from fermigrator.database import ContourDatabase
+from fermigrator.contours2D import get_contours_and_WFs
+from fermigrator.scattering_matrix import ScatteringMatrix, get_chk
 
 # 1. Set up the system from Wannier90 files
 from wannierberri import System_R
@@ -69,7 +69,7 @@ A complete graphene example using DFT data is in [`examples/graphene_dft/`](exam
 ## Package structure
 
 ```
-integrateFermi/
+fermigrator/
   contours2D.py          # Fermi surface extraction (triangulation method)
   database.py            # File-based storage for contours and matrices
   scattering_matrix.py   # ScatteringMatrix class + Bloch→Wannier transform

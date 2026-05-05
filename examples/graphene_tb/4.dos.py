@@ -2,7 +2,7 @@ from matplotlib import pyplot as plt
 from wannierberri import Grid, run
 from wannierberri.calculators.static import DOS, CumDOS
 from fermigrator.database import ContourDatabase
-from fermigrator.linewidth import getDOS
+from fermigrator.fermigrator.skew import getDOS
 import numpy as np
 dos_dict = {}
 

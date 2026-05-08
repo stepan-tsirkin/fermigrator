@@ -82,7 +82,7 @@ for method in ["multipole"]:
     print (f"Integral of DOS over Efermi: {dos_sum:.2f} states/unit cell")
 
     axes.plot(x, y, "o", label="Skew")
-    axes.plot(x, (dos*dos*V0**3)/8, "x", label=f"DOS^2*V0^3/8, V0={V0} eV") 
+    # axes.plot(x, (dos*dos*V0**3)/8, "x", label=f"DOS^2*V0^3/8, V0={V0} eV") 
     axes.set_xlabel(r"$E-E_F$ (eV)")
     axes.set_ylabel("Average skew")
     axes.grid()

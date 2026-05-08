@@ -22,6 +22,8 @@ cumdos = result.results["cumdos"].data
 
 EF0 = EF[np.argmin(np.abs(cumdos - 2))]
 
+np.savez("efermi.npz", EF=EF0, cumdos=cumdos)
+
 
 plt.plot(EF, cumdos)
 plt.title(f"Cumulative DOS, EF = {EF0:.3f} eV")

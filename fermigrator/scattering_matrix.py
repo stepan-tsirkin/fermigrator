@@ -299,8 +299,8 @@ class ScatteringMatrix:
         if contours_db is not None:
             ib = contours_db.split_filename(file)["ib"]
             EF = contours_db.split_filename(file)["EF"]
-            contours_db.set_data("multipole-vertex", dict(vertex=vertex, projector=projector, kpoints=kpoints),
-                                 ib=ib, EF=EF)
+            contours_db.set_data("multipole-vertex", dict(vertex=vertex), ib=ib, EF=EF)
+            contours_db.set_data("multipole-projector", dict(projector=projector, kpoints=kpoints), ib=ib, EF=EF)
         return vertex, projector
 
     def get_multipole_on_contours_all(self, contours_db, Efermi_list=None):

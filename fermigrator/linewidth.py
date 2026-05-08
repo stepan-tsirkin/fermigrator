@@ -125,9 +125,9 @@ def get_linewidth_multipole_Efermi(contours_db, EF):
         contour = np.load(file_contour)
         linewidths_dict[ib] = np.zeros(
             contour["kpoints"].shape[0], dtype=float)
-        vertex_file = contours_db.get_data(
-            typ="multipole-vertex", ib=ib, EF=EF)
-        projector = vertex_file["projector"]
+        projector_file = contours_db.get_data(
+            typ="multipole-projector", ib=ib, EF=EF)
+        projector = projector_file["projector"]
         for vertex2_file in files_vertices:
             jb = contours_db.split_filename(vertex2_file)["ib"]
             vertex2 = np.load(vertex2_file)["vertex"]

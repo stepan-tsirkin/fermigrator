@@ -1,25 +1,25 @@
 import numpy as np
 from fermigrator.database import ContourDatabase
-from fermigrator.fermigrator.skew import getDOS
+from fermigrator.linewidth import getDOS
 from matplotlib import pyplot as plt
 
 EF0 = np.load("efermi.npz")["EF"]
-V0=3
+V0=1
 
 contour_db = ContourDatabase.read("contours")
 
 method = "multipole"  # "direct" or "multipole"
 # methd = "direct"  # "direct" or "multipole"
 
-for method in ["direct",]:# "multipole"]:
+for method in ["direct", "multipole"]:
     if method == "direct":
-        from fermigrator.fermigrator.skew import get_skew_Efermi as get_skew
+        from fermigrator.linewidth import get_linewidth_Efermi as get_linewidth
     elif method == "multipole":
-        from fermigrator.fermigrator.skew import get_linewidth_multipole_Efermi as get_skew
+        from fermigrator.linewidth import get_linewidth_multipole_Efermi as get_linewidth
 
     linewidth_dict = {}
     for Efermi in contour_db.get_all_Efermi():
-        linewidth_dict[Efermi] = get_skew(contour_db, Efermi)
+        linewidth_dict[Efermi] = get_linewidth(contour_db, Efermi)
 
     nfermi = len(linewidth_dict)
     ncols = 4
@@ -60,6 +60,7 @@ for method in ["direct",]:# "multipole"]:
     x = []
     y = []
     dos = []
+    dos_x = []
 
     fig, axes = plt.subplots(1, 1, figsize=(6, 6), layout="tight")
     for i, Efermi in enumerate(sorted(linewidth_dict.keys())):
@@ -69,20 +70,27 @@ for method in ["direct",]:# "multipole"]:
             if np.mean(lw) < 100000:
                 x.append(float(Efermi))
                 y.append(np.mean(lw))
+        dos_x.append(float(Efermi))
         dos.append( getDOS(contour_db, Efermi) )
     x = np.array(x)-EF0
     srt = np.argsort(x)
     x = x[srt]
     y = np.array(y)[srt]
-    dos = np.array(dos)[srt]
+    
+    dos = np.array(dos) 
+    dos_x = np.array(dos_x)-EF0
 
-    dx = x[1:] - x[:-1]
+    srt = np.argsort(dos_x)
+    dos_x = dos_x[srt]
+    dos = dos[srt]
+
+    dx = dos_x[1:] - dos_x[:-1]
     dos_sum = sum((dos[:-1] + dos[1:]) / 2 * dx)
 
     print (f"Integral of DOS over Efermi: {dos_sum:.2f} states/unit cell")
 
     axes.plot(x, y, "o", label="Linewidth")
-    axes.plot(x, (dos*V0**2)/4, "x", label=f"DOS*V0^2/4, V0={V0} eV") 
+    axes.plot(dos_x, (dos*V0**2)/4, "x", label=f"DOS*V0^2/4, V0={V0} eV") 
     axes.set_xlabel(r"$E-E_F$ (eV)")
     axes.set_ylabel("Average linewidth")
     axes.grid()

@@ -4,24 +4,24 @@ from fermigrator.linewidth import getDOS
 from matplotlib import pyplot as plt
 
 EF0 = np.load("efermi.npz")["EF"]
-V0=3
+V0=1
 
 contour_db = ContourDatabase.read("contours")
 
-# method = "multipole"  # "direct" or "multipole"
+method = "multipole"  # "direct" or "multipole"
 # methd = "direct"  # "direct" or "multipole"
 
 for method in ["multipole"]:
     if method == "direct":
-        from fermigrator.skew import get_skew_Efermi as get_skew
+        from fermigrator.linewidth import get_linewidth_Efermi as get_linewidth
     elif method == "multipole":
-        from fermigrator.skew import get_skew_multipole_Efermi as get_skew
+        from fermigrator.linewidth import get_linewidth_multipole_Efermi as get_linewidth
 
-    skew_dict = {}
+    linewidth_dict = {}
     for Efermi in contour_db.get_all_Efermi():
-        skew_dict[Efermi] = get_skew(contour_db, Efermi)
+        linewidth_dict[Efermi] = get_linewidth(contour_db, Efermi)
 
-    nfermi = len(skew_dict)
+    nfermi = len(linewidth_dict)
     ncols = 4
     nrows = nfermi // ncols
     if nfermi % ncols != 0:
@@ -29,19 +29,23 @@ for method in ["multipole"]:
     fig, axes = plt.subplots(nrows, ncols, figsize=(
         6*ncols, 6*nrows), layout="tight")
     _, recip_lattice = contour_db.get_E_grid()
-    for i, Efermi in enumerate(sorted(skew_dict.keys())):
-        ax = axes[i//ncols, i % ncols]
-        for ib, lw in skew_dict[Efermi].items():
+    axes_cnt = 0
+    for i, Efermi in enumerate(sorted(linewidth_dict.keys())):
+        for ib, lw in linewidth_dict[Efermi].items():
+            ax = axes[axes_cnt//ncols, axes_cnt % ncols]
+            axes_cnt += 1
             contour = contour_db.get_data("contour", ib=ib, EF=Efermi)
             kpoints = contour["kpoints"]
             kpoints_cart = kpoints @ recip_lattice
-            sc = ax.scatter(
-                kpoints_cart[:, 0], kpoints_cart[:, 1], c=lw, cmap="viridis", s=20)
-            # make colorbar smaller and to the right of the plot and colorscale from min to max of lw
-            vmin, vmax = np.min(lw), np.max(lw)
-            sc.set_clim(vmin, vmax)
-            cbar = fig.colorbar(sc, ax=ax, fraction=0.046, pad=0.04)
-            cbar.set_label("Skew", rotation=270, labelpad=15)
+            for s in range(lw.shape[1]):
+                lws = lw[:, s]
+                sc = ax.scatter(
+                    kpoints_cart[:, 0], kpoints_cart[:, 1], c=lws, cmap="viridis", s=20)
+                # make colorbar smaller and to the right of the plot and colorscale from min to max of lw
+                vmin, vmax = np.min(lws), np.max(lws)
+                sc.set_clim(vmin, vmax)
+                cbar = fig.colorbar(sc, ax=ax, fraction=0.046, pad=0.04)
+                cbar.set_label("Linewidth", rotation=270, labelpad=15)
             # fig.colorbar(sc, ax=ax)
         ax.set_title(
             f"Efermi={float(Efermi):.2f}, tau={vmin:.2e}+-{(vmax-vmin)/2:.2e}")
@@ -54,7 +58,7 @@ for method in ["multipole"]:
     for j in range(i+1, nrows*ncols):
         fig.delaxes(axes[j//ncols, j % ncols])
 
-    plt.savefig(f"skew-{method}.png")
+    plt.savefig(f"linewidths-{method}.png")
     plt.close()
 
     x = []
@@ -62,10 +66,10 @@ for method in ["multipole"]:
     dos = []
 
     fig, axes = plt.subplots(1, 1, figsize=(6, 6), layout="tight")
-    for i, Efermi in enumerate(sorted(skew_dict.keys())):
+    for i, Efermi in enumerate(sorted(linewidth_dict.keys())):
         # if abs(float(Efermi)) >0.95:
         #     continue
-        for ib, lw in skew_dict[Efermi].items():
+        for ib, lw in linewidth_dict[Efermi].items():
             if np.mean(lw) < 100000:
                 x.append(float(Efermi))
                 y.append(np.mean(lw))
@@ -81,13 +85,13 @@ for method in ["multipole"]:
 
     print (f"Integral of DOS over Efermi: {dos_sum:.2f} states/unit cell")
 
-    axes.plot(x, y, "o", label="Skew")
-    # axes.plot(x, (dos*dos*V0**3)/8, "x", label=f"DOS^2*V0^3/8, V0={V0} eV") 
+    axes.plot(x, y, "o", label="Linewidth")
+    axes.plot(x, (dos*V0**2)/4, "x", label=f"DOS*V0^2/4, V0={V0} eV") 
     axes.set_xlabel(r"$E-E_F$ (eV)")
-    axes.set_ylabel("Average skew")
+    axes.set_ylabel("Average linewidth")
     axes.grid()
-    axes.set_title("Skew vs Efermi")
+    axes.set_title("Linewidth vs Efermi")
     axes.legend()
-    plt.savefig(f"skew_vs_Efermi-{method}.png")
+    plt.savefig(f"linewidths_vs_Efermi-{method}.png")
     plt.close()
 

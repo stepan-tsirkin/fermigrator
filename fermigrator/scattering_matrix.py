@@ -14,22 +14,37 @@ class ScatteringMatrix:
     Hermiticity V_ab^{R1 R2} = (V_ba^{R2 R1})* is enforced on construction.
     """
 
-    def __init__(self, rvec, Vrrab=None, num_wann=None,
+    def __init__(self, rvec, Vrrab=None, num_wann=None, nspin=1, multipole_threshold=1e-8
                  ):
         self.rvec = Rvectors2.from_Rvectors(rvec)
         if Vrrab is not None:
-            self.Vrrab = Vrrab
-            assert Vrrab.shape == (rvec.nRvec, rvec.nRvec, self.num_wann,
+            if Vrrab.ndim == 4:
+                nspin = 1
+                assert Vrrab.shape == (rvec.nRvec, rvec.nRvec, self.num_wann,
                                    self.num_wann), f"Vrrab should have shape (nRvec, nRvec, num_wann, num_wann), but got {Vrrab.shape}"
-            diff = Vrrab - Vrrab.transpose(1, 0, 3, 2).conj()
+                num_wann = Vrrab.shape[2]// nspin
+                Vrrab = Vrrab.reshape(self.rvec.nRvec, self.rvec.nRvec, num_wann, nspin, num_wann, nspin).transpose(0, 1, 2, 4, 3, 5)
+            elif Vrrab.ndim == 6:
+                nspin = Vrrab.shape[4]
+                assert Vrrab.shape == (rvec.nRvec, rvec.nRvec, num_wann, num_wann, nspin, nspin), f"Vrrab should have shape (nRvec, nRvec, num_wann, num_wann, nspin, nspin), but got {Vrrab.shape}"
+            self.Vrrab = Vrrab
+            diff = Vrrab - Vrrab.transpose(1, 0, 3, 2, 5, 4).conj()
             max_diff = np.max(np.abs(diff))
             assert max_diff < 1e-10, f"Vrrab is not Hermitian, max difference is {max_diff}, which may indicate that the transformation from Vkkmn to Vrrab is not correct or that the input Vkkmn is not correct"
-
         elif num_wann is not None:
             self.Vrrab = np.zeros(
-                (rvec.nRvec, rvec.nRvec, num_wann, num_wann), dtype=complex)
+                (rvec.nRvec, rvec.nRvec, num_wann, num_wann, nspin, nspin), dtype=complex)
         else:
             raise ValueError("Either Vrrab or num_wann should be provided")
+        self.multipole_threshold = multipole_threshold
+
+    @property
+    def num_wann(self):
+        return self.Vrrab.shape[2]
+    
+    @property
+    def nspin(self):
+        return self.Vrrab.shape[4]
 
     @classmethod
     def from_Vkk(cls, Vkkmn_wan,
@@ -43,7 +58,7 @@ class ScatteringMatrix:
 
         Parameters
         ----------
-        Vkkmn_wan : ndarray, shape (NK, NK, NW, NW)
+        Vkkmn_wan : ndarray, shape (NK, NK, NW, NW, NSPIN, NSPIN)
             Matrix elements V_{mn}(k, k') in eV, Wannier gauge, on a uniform k-grid.
         center_red : array (3,), optional
             Reduced coordinates of the scattering centre (default: origin).
@@ -58,11 +73,14 @@ class ScatteringMatrix:
         kpt_red : array (NK, 3)
             k-points in reduced coordinates matching the rows of Vkkmn_wan.
         """
-        assert Vkkmn_wan.ndim == 4, f"Vkkmn_wan must be a 4D array with shape (NK, NK, NB, NB), but got shape {Vkkmn_wan.shape}"
+        assert Vkkmn_wan.ndim == 6, f"Vkkmn_wan must be a 6D array with shape (NK, NK, NW, NSPIN, NW, NSPIN), but got shape {Vkkmn_wan.shape}"
         assert Vkkmn_wan.shape[0] == Vkkmn_wan.shape[
             1], f"The first two dimensions of Vkkmn_wan must be the same, but got {Vkkmn_wan.shape[0]} and {Vkkmn_wan.shape[1]}"
         assert Vkkmn_wan.shape[2] == Vkkmn_wan.shape[
-            3], f"The last two dimensions of Vkkmn_wan must be the same, but got {Vkkmn_wan.shape[2]} and {Vkkmn_wan.shape[3]}"
+            3], f"The num_wann dimensions of Vkkmn_wan must be the same, but got {Vkkmn_wan.shape[2]} and {Vkkmn_wan.shape[3]}"
+        assert Vkkmn_wan.shape[4] == Vkkmn_wan.shape[
+            5], f"The num_spin dimensions of Vkkmn_wan must be the same, but got {Vkkmn_wan.shape[4]} and {Vkkmn_wan.shape[5]}"
+        assert Vkkmn_wan.shape[4] in [1, 2], f"The num_spin dimension of Vkkmn_wan must be 1 or 2, but got {Vkkmn_wan.shape[4]}"
 
         if center_red is None:
             center_red = np.zeros(3, dtype=float)
@@ -79,18 +97,15 @@ class ScatteringMatrix:
         Vrrab = Vabcrr[:, :, 0, :, :].transpose(2, 3, 0, 1)
         return cls(rvec=rvectors, Vrrab=Vrrab)
 
-    def set_VRR(self, Vrrab, irvec1, irvec2, ab=None):
+    def set_VRR(self, Vrrab, irvec1, irvec2, a=slice(None), b=slice(None), s1=slice(None), s2=slice(None)):
         assert self.Vrrab is not None, "Vrrab is not set, please initialize the scattering matrix with Vrrab or num_wann first"
         ir1 = self.rvec.iR(irvec1)
         ir2 = self.rvec.iR(irvec2)
-        if ab is None:
-            self.Vrrab[ir1, ir2] = Vrrab
-        else:
-            self.Vrrab[ir1, ir2, ab[0], ab[1]] = Vrrab
-
+        self.Vrrab[ir1, ir2, a, b, s1, s2] = Vrrab
+ 
     def as_dict(self):
         dict = {}
-        for key in ["center_red", "Vrrab",
+        for key in ["center_red", "Vrrab", "multipole_threshold",
                     "_multipole_eigenvalues", "_multipole_eigenvectors"]:
             if hasattr(self, key):
                 if getattr(self, key) is not None:
@@ -228,13 +243,13 @@ class ScatteringMatrix:
     @property
     def multipole_eigenvectors(self):
         if not hasattr(self, "_multipole_eigenvectors"):
-            self.multipole_decomposition_RR()
+            self.multipole_decomposition_RR(select_threshold=self.multipole_threshold)
         return self._multipole_eigenvectors
 
-    def multipole_decomposition_RR(self, select_threshold=-1):
-        """Decompose V_ab^{RR'} into eigenmodes (multipoles).
+    def multipole_decomposition_RR(self, select_threshold=1e-8):
+        """Decompose V_abst^{RR'} into eigenmodes (multipoles).
 
-        Reshapes V_ab^{R1 R2} as a square matrix V_{(R1,a),(R2,b)}, then
+        Reshapes V_abst^{R1 R2} as a square matrix V_{(R1,a,s),(R2,b,t)}, then
         diagonalises: V = Σ_l λ_l |φ_l><φ_l|.  Modes are sorted by |λ_l|
         and those with |λ_l|/|λ_0| > select_threshold are kept.
 
@@ -246,20 +261,22 @@ class ScatteringMatrix:
             Relative cutoff; -1 keeps all modes.
         """
         assert self.Vrrab is not None, "Vrrab is not set, please set it first using set_RR"
-        Vrarb = self.Vrrab.transpose(0, 2, 1, 3).reshape(
-            self.rvec.nRvec * self.num_wann, self.rvec.nRvec * self.num_wann)
+        Vrarb = self.Vrrab.transpose(0, 2, 4, 1, 3, 5).reshape(
+            self.rvec.nRvec * self.num_wann * self.nspin, self.rvec.nRvec * self.num_wann * self.nspin)
         e, v = np.linalg.eigh(Vrarb)
         srt = np.argsort(-abs(e))
         e = e[srt]
-        if e[0] < 1e-15:
+        if abs(e[0]) < 1e-15:
             print("Warning: the largest eigenvalue is smaller than 1e-15, which may indicate that the scattering matrix is not properly set or that the system is very weakly scattering")
-            return np.zeros(0), np.zeros((0, self.rvec.nRvec, self.num_wann))
-        nselect = max(np.where(e / e[0] > select_threshold)[0] + 1)
-        e = e[:nselect]
-        v = v[:, srt[:nselect]]
-        self._multipole_eigenvalues = e
-        self._multipole_eigenvectors = v.T.reshape(
-            nselect, self.rvec.nRvec, self.num_wann)
+            self._multipole_eigenvalues = np.zeros(0)
+            self._multipole_eigenvectors = np.zeros((0, self.rvec.nRvec, self.num_wann, self.nspin))
+        else:
+            nselect = max(np.where(abs(e)/abs(e[0]) > select_threshold)[0] + 1)
+            e = e[:nselect]
+            v = v[:, srt[:nselect]]
+            self._multipole_eigenvalues = e
+            self._multipole_eigenvectors = v.T.reshape(
+                nselect, self.rvec.nRvec, self.num_wann, self.nspin)
         return self._multipole_eigenvalues, self._multipole_eigenvectors
 
     def get_multipole_on_contour(self, file, contours_db=None):
@@ -288,20 +305,26 @@ class ScatteringMatrix:
             kpoints = f["kpoints"]
             wavefunctions = f["wavefunctions"]
             weight = f["weights"]
+            grad = f["grad"] 
 
         v = self.multipole_eigenvectors
         e = self.multipole_eigenvalues
+        
+        from wannierberri.utility import pauli_x, pauli_y, pauli_z
+        pauli = np.array([pauli_x, pauli_y, pauli_z]) 
 
         exp = np.exp(-2j * np.pi * self.rvec.iRvec[:, :2] @ kpoints.T)
-        W = cached_einsum('lRa, Rk, ka -> lk', v, exp, wavefunctions)
-        vertex = cached_einsum('lk, k, mk , m-> lm', W.conj(), weight, W, e)
-        projector = cached_einsum('lk, mk, m -> klm', W.conj(), W, e)
+        W = cached_einsum('lRas, Rk, ka -> lks', v, exp, wavefunctions)
+        vertex = cached_einsum('lks, k, mks , m-> lm', W.conj(), weight, W, e)
+        
         if contours_db is not None:
             ib = contours_db.split_filename(file)["ib"]
             EF = contours_db.split_filename(file)["EF"]
             contours_db.set_data("multipole-vertex", dict(vertex=vertex), ib=ib, EF=EF)
-            contours_db.set_data("multipole-projector", dict(projector=projector, kpoints=kpoints), ib=ib, EF=EF)
-        return vertex, projector
+            contours_db.set_data("multipole-eigen", dict(eigenvectors=W, eigenvalues=e), ib=ib, EF=EF)
+        return vertex, W, e
+            
+
 
     def get_multipole_on_contours_all(self, contours_db, Efermi_list=None):
         """Compute and save multipole vertex/projector for all contours at each Fermi level."""
@@ -311,10 +334,13 @@ class ScatteringMatrix:
             f"Calculating multipole vertex on contours for Efermi_list={Efermi_list}")
         for Efermi in Efermi_list:
             file_list = contours_db.get_files_Efermi("contour", Efermi)
+            vertex = 0
             for f in file_list:
                 print(
                     f"Calculating multipole vertex on contour for Efermi={Efermi} using file {f}")
-                self.get_multipole_on_contour(f, contours_db=contours_db)
+                ver, _, __ = self.get_multipole_on_contour(f, contours_db=contours_db)
+                vertex += ver
+            contours_db.set_data("multipole-vertex-sum", dict(vertex=vertex), EF=Efermi)
 
 
 def bloch2wann(Vkkmn,

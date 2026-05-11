@@ -27,12 +27,16 @@ class ContourDatabase:
             Decimal places used when formatting Fermi energies in filenames.
         num_digits_band : int
             Zero-padded width for band indices in filenames.
+        double_spin_system : bool
+            if True, the system is considered to be the same for spin-up and spin-down electrons, so summation over spin will 
+            be performed
         """
         self.path = path
         os.makedirs(self.path, exist_ok=True)
         self.num_digits_Efermi = num_digits_Efermi
         self.num_digits_band = num_digits_band
         self.files_dicts = {}
+        self.nspin_system = 1
         np.savez(os.path.join(self.path, "metadata.npz"),
                  num_digits_Efermi=num_digits_Efermi, num_digits_band=num_digits_band)
 
@@ -81,6 +85,10 @@ class ContourDatabase:
             k, v = part.split("=")
             res[k] = v
         return res
+    
+    @cached_property
+    def nspin_system(self):
+        return 2 if self.double_spin_system else 1
 
     def get_filename(self, typ, **kwargs):
         lst = [typ] + \
@@ -108,7 +116,7 @@ class ContourDatabase:
         filename = self.get_filename(typ, **kwargs)
         np.savez(filename, **data)
 
-    def get_data(self, typ, none_if_missing=True, **kwargs):
+    def get_data(self, typ, none_if_missing=False, **kwargs):
         """Load a .npz file and return its contents as a plain dict.
 
         Returns None (or raises FileNotFoundError) if the file does not exist.
@@ -130,9 +138,15 @@ class ContourDatabase:
             EF = self.split_filename(fname)["EF"]
             Efermi_set.add(EF)
         return Efermi_set
+    
+    def get_all_Efermi_float(self):
+        """Return the set of Fermi energy floats present in the database (from contour files)."""
+        Efermi_set = self.get_all_Efermi()
+        Efermi_set = set(float(EF) for EF in Efermi_set)
+        return np.array(sorted(Efermi_set))
 
     def get_all_bands(self, Efermi=None):
-        """Return the set of band indices stored in the database.
+        """Return the set of band indices of contours stored in the database.
 
         If `Efermi` is given, restrict to files matching that Fermi level;
         otherwise return the union over all Fermi levels.
@@ -141,15 +155,10 @@ class ContourDatabase:
             return set.union(*[self.get_all_bands(Efermi) for Efermi in self.get_all_Efermi()])
         else:
             band_set = set()
-            for key in self.files_dicts.get("contour", {}).keys():
-                if key["EF"] == self.format_EF(Efermi):
-                    band_set.add(int(key["ib"]))
-            for typ in self.file_types:
-                for f in glob.glob(os.path.join(self.path, f"{typ}_ib*EF={self.format_EF(Efermi)}.npz")):
-                    info = self.split_filename(f)
-                    for k, val in info.items():
-                        if k.startswith("ib"):
-                            band_set.add(int(info[k]))
+            Efermi_format = self.format_EF(Efermi)
+            for fname in glob.glob(os.path.join(self.path, f"contour*_EF={Efermi_format}*.npz")):
+                info = self.split_filename(fname)
+                band_set.add(int(info["ib"]))
             return band_set
 
     def get_files_Efermi(self, typ, Efermi):

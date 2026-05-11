@@ -7,7 +7,6 @@ from wannierberri import System_R, run, Grid
 wandata = WannierData.from_w90_files(
     seedname="wannier/graphene", files=["chk", "eig"])
 system = System_R.from_wannierdata(wandata, periodic=[True, True, False])
-system.double_spin()
 system.set_pointgroup(["C6z", "Inversion", "TimeReversal"])
 
 system.to_npz("graphene-system")

@@ -4,10 +4,8 @@ import numpy as np
 from wannierberri import System_R, run, Grid
 
 from wannierberri.models import Haldane_ptb
-from wannierberri.system import System_PythTB
 import ray
 ray.init()
-
 
 def graphene_ptb(delta=0, hop1=-1.0):
     """same as :func:`~wannierberri.models.Haldane_tbm`, but uses `PythTB <http://www.physics.rutgers.edu/pythtb/>`__
@@ -31,7 +29,7 @@ def graphene_ptb(delta=0, hop1=-1.0):
 system = System_R.from_pythtb(Haldane_ptb(delta=0, phi=0, hop1=1, hop2=0))
 
 
-nspin=2
+nspin=1
 if nspin == 2:
     system.double_spin()
 system.set_pointgroup(["C6z", "Inversion", "TimeReversal"])

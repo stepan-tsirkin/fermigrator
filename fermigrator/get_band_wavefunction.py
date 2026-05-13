@@ -42,6 +42,11 @@ class TabulatorWaveFunction(Tabulator):
 
     def __call__(self, data_k):
         U = data_k.UU_K[:, :, self.iband]
+        if isinstance(self.iband, Iterable):
+            assert U.ndim == 3 and U.shape[2] == len(self.iband)
+            U =  U.swapaxes(1, 2)
+        else:
+            assert U.ndim == 2
         return KBandResult(U, transformTR=nevertransform, transformInv=nevertransform)
 
 
@@ -82,10 +87,4 @@ def get_wavefunction_on_kpoints(system, kpoints, ibands, **kwargs_run):
                           tabulators={"wavefunction": tabulator},
                           **kwargs_run
                           )
-    data = res.results["wavefunction"].data
-    if isinstance(ibands, Iterable):
-        assert data.ndim == 3 and data.shape[2] == len(ibands)
-        return data.swapaxes(1, 2)
-    else:
-        assert data.ndim == 2
-        return data
+    return res.results["wavefunction"].data

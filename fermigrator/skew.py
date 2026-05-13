@@ -1,76 +1,143 @@
 import numpy as np
 from wannierberri.utility import cached_einsum
+from scipy.constants import hbar
 
+def get_Wkk_Efermi(contours_db, EF):
+    """Computes the skew scattering matrix Wkk
 
-def get_skew_Efermi(contours_db, EF):
-    """Compute quasiparticle skew scattering on the Fermi surface via Fermi's golden rule.
+    W_{nk,mk'} = sum_{rq} Im[V_{nk,mk'} V_{mk',rq} V_{rq,nk}] w_k * w_{k'} w_q
 
-    For each k-point on the Fermi surface of band `ib`, evaluates:
-
-        Γ(ib1, k) = Σ_{ib2, ib3, k',k''} V_{ib1,ib2}(k, k') V_{ib2,ib3}(k', k'') V_{ib3,ib1}(k'', k) w(k') w(k'')
-
-    where the sum over k' and k'' runs over all Fermi surface points of all bands at the same Fermi level and w(k') are the contour integration weights
-    (proportional to the segment length / |∇E|, approximating the delta function δ(E_k' - E_F)).  The pre-computed Vkk files (band matrix elements of the scattering matrix on the contour) are read from `contours_db`.
-
+    where 
+    - n, m, r are band indices
+    - k, k', q are k-point indices
+    - V_{nk,mk'} is the scattering matrix element between states (n,k) and (m,k')
+    - w_k is the weight of the k-point in the contour integration for the Fermi energy EF
 
     Parameters
     ----------
-    contours_db : ContourDatabase
-    EF : str or float
-        Fermi energy label as stored in the database.
-
-    Returns
-    -------
-    dict {band_index: ndarray (N_k,)}
-        Linewidth Γ(k) in the same units as the scattering matrix (eV if
-        Vkk was stored in eV).
+    contours_db : ContoursDB
+        The database containing the contours and the scattering matrices
+    EF : float
+        The Fermi energy at which to compute the skew scattering matrix 
     """
     files_contour = contours_db.get_files_Efermi("contour", EF)
     contour_dict = {contours_db.split_filename(f)["ib"]: f for f in files_contour}
     skew_dict = {}
-    for ib, file_contour in contour_dict.items():
-        contour1 = np.load(file_contour)
-        skew_dict[ib] = np.zeros(
-            contour1["kpoints"].shape[0], dtype=float)
-        for ib2 in contour_dict.keys():
-            w2 = np.load(contour_dict[ib2])["weights"]
-            Vkk12 = contours_db.get_data(
-                typ="Vkk", ib1=ib, ib2=ib2, EF=EF, none_if_missing=False)["Vkk"]
-            for ib3 in contour_dict.keys():
-                print(f"Calculating skew for Efermi={EF} using contours for ib1={ib}, ib2={ib2} and ib3={ib3}")
-                w3 = np.load(contour_dict[ib3])["weights"]
-                Vkk_23 = contours_db.get_data(
-                    typ="Vkk", ib1=ib2, ib2=ib3, EF=EF, none_if_missing=False)["Vkk"]
-                Vkk_31 = contours_db.get_data(
-                    typ="Vkk", ib1=ib3, ib2=ib, EF=EF, none_if_missing=False)["Vkk"]
-                skew = cached_einsum('kq,q,qp,p,pk->k', Vkk12, w2, Vkk_23, w3, Vkk_31).imag
-                print(f"Skew for ib1={ib}, ib2={ib2} and Efermi={EF} has min {skew.min()} and max {skew.max()}")
-                contours_db.set_data("skew", dict(skew=skew, kpoints=contour1["kpoints"], weights=contour1["weights"]),
-                                     ib1=ib, ib2=ib2, ib3=ib3, EF=EF)
-                skew_dict[ib] += skew
+    ib_list = sorted(contour_dict.keys())
+    for n in ib_list:
+        contour1 = np.load(contour_dict[n])
+        wn = contour1["weights"]
+        for m in ib_list:
+            contour2 = np.load(contour_dict[m])
+            wm = contour2["weights"]
+            Vkk_12 = contours_db.get_data(
+                typ="Vkk", ib1=n, ib2=m, EF=EF, none_if_missing=False)["Vkk"]
+            Wkk = 0
+            for r in ib_list:
+                contour3 = np.load(contour_dict[r])
+                wq = contour3["weights"]
+                Vkk_23 = contours_db.get_data(typ="Vkk", ib1=m, ib2=r, EF=EF, none_if_missing=False)["Vkk"]
+                Vkk_31 = contours_db.get_data(typ="Vkk", ib1=r, ib2=n, EF=EF, none_if_missing=False)["Vkk"]
+                Wkk += cached_einsum('k,kp,p,pq,q,qk->kp', wn, Vkk_12, wm, Vkk_23, wq, Vkk_31).imag
+            contours_db.set_data("Wkk", dict(Wkk=Wkk), ib1=n, ib2=m, EF=EF)
     return skew_dict
 
 
-def get_skew_multipole_Efermi(contours_db, EF):
-    """
-    same as get_skew_Efermi but using the multipole expansion of the scattering matrix
-    """
+def get_AHC(contours_db, EF, gamma_0 = 1e-8):
+    """Computes the anomalous Hall conductivity (AHC) from the skew scattering matrix Wkk
 
-    skew_dict = {}
+    AHC = (e^2 / hbar) * sum_{nk,mk'} W_{nk,mk'} * (v_{nk} x v_{mk'} * tau_{nk} * tau_{mk'})
+
+    where 
+    - n, m are band indices
+    - k, k' are k-point indices
+    - W_{nk,mk'} is the skew scattering matrix element between states (n,k) and (m,k')
+    - v_{nk} is the group velocity of state (n,k)
+
+    Parameters
+    ----------
+    contours_db : ContoursDB
+        The database containing the contours and the skew scattering matrices
+    EF : float
+        The Fermi energy at which to compute the AHC 
+    """
     files_contour = contours_db.get_files_Efermi("contour", EF)
-    files_vertices = contours_db.get_files_Efermi("multipole-vertex", EF)
-    vert = np.sum([np.load(vertex2_file)["vertex"] for vertex2_file in files_vertices], axis=0)
-    vert = vert @ vert
-    for file_contour in files_contour:
-        ib = contours_db.split_filename(file_contour)["ib"]
-        # print ("loading contour and projector...")
-        contour = np.load(file_contour)
-        proj_file = contours_db.get_data(typ="multipole-projector", ib=ib, EF=EF)
-        projector = proj_file["projector"]
+    contour_dict = {contours_db.split_filename(f)["ib"]: f for f in files_contour}
+    ahc = 0
+    ib_list = sorted(contour_dict.keys())
+    for n in ib_list:
+        contour1 = np.load(contour_dict[n])
+        vn = contour1["grad"]
+        gamma_n = contours_db.get_data(typ="linewidth", ib=n, EF=EF, none_if_missing=False)["linewidth"]
+        gamma_n = np.maximum(gamma_n, gamma_0)
+        vtau_n = vn/ gamma_n[:, None]
+        for m in ib_list:
+            contour2 = np.load(contour_dict[m])
+            vm = contour2["grad"]
+            gamma_m = contours_db.get_data(typ="linewidth", ib=m, EF=EF, none_if_missing=False)["linewidth"]
+            gamma_m = np.maximum(gamma_m, gamma_0)
+            vtau_m = vm/ gamma_m[:, None]
+            Wkk = contours_db.get_data(typ="Wkk", ib1=n, ib2=m, EF=EF, none_if_missing=False)["Wkk"]
+            ahc += cached_einsum('ka,kp,pb->ab', vtau_n, Wkk, vtau_m).real
+    return ahc
 
-        skew = np.sum(projector * vert[None, :, :], axis=(1, 2)).imag
-        # print ('einsum done')
-        skew_dict[ib] = skew
-        contours_db.set_data("skew-multipole", dict(skew=skew, kpoints=contour["kpoints"], weights=contour["weights"]),
-                             ib=ib, EF=EF)
-    return skew_dict
+
+
+
+
+
+def get_multipole_vtau(contours_db, EF, ib, gamma_0 = 1e-8):
+    # print (f"Calculating multipole vertex on contour for Efermi={EF} and band index ib={ib} with gamma_0={gamma_0}")
+    pauli_z = np.array([[1, 0], [0, -1]])
+    contour = contours_db.get_data("contour", ib=ib, EF=EF, none_if_missing=False)
+    weight = contour["weights"]
+    multipole_eigen = contours_db.get_data(typ="multipole-eigen", ib=ib, EF=EF)
+    mult_e = multipole_eigen["eigenvalues"]
+    mult_W = multipole_eigen["eigenvectors"]
+    nspin = mult_W.shape[2]
+    assert nspin == 2, f"Expected 2 spin channels in multipole eigenvectors, but got {nspin}"
+    grad = contour["grad"]
+    gamma = contours_db.get_data(typ="linewidth-multipole", ib=ib, EF=EF, none_if_missing=False)["linewidth"]
+    gamma = np.maximum(gamma, gamma_0)
+    vtau = grad[:,None, :] / gamma[:,  :, None]
+    vertex_velocity = cached_einsum('lks, k, mks , m, ksa-> lma', 
+                                    mult_W.conj(), weight, mult_W, mult_e, vtau)
+    vertex_spin_velocity = cached_einsum('lks, k, mks , m, ss, ksa-> lma', 
+                                         mult_W.conj(), weight, mult_W, mult_e, pauli_z, vtau)
+    contours_db.set_data("multipole-vtau", dict(vertex_velocity=vertex_velocity, vertex_spin_velocity=vertex_spin_velocity), ib=ib, EF=EF)
+    return vertex_velocity, vertex_spin_velocity
+
+
+def get_all_multipole_vtau(contours_db, EF=None, gamma_0 = 1e-8):
+    if EF is None:
+        EFs = contours_db.get_all_Efermi_float()
+        for EF in EFs:
+            get_all_multipole_vtau(contours_db, EF=EF, gamma_0=gamma_0)
+        return
+    iblist = contours_db.get_all_bands(EF)
+    # print (f"Calculating multipole vertex on contours for Efermi={EF} and all bands {iblist} with gamma_0={gamma_0}")
+    vertex_velocity_sum = 0
+    vertex_spin_velocity_sum = 0
+    for ib in iblist:
+        vle, spinvel = get_multipole_vtau(contours_db, EF, ib, gamma_0=gamma_0)
+        vertex_velocity_sum += vle
+        vertex_spin_velocity_sum += spinvel
+    contours_db.set_data("multipole-vtau-sum", dict(vertex_velocity=vertex_velocity_sum, vertex_spin_velocity=vertex_spin_velocity_sum), EF=EF)
+    return vertex_velocity_sum, vertex_spin_velocity_sum
+
+def get_AHC_multipole(contours_db, EF, gamma_0 = 1e-8):
+    vertex_v = contours_db.get_data("multipole-vtau-sum", EF=EF)
+    vtau = vertex_v["vertex_velocity"]
+    # vertex_sv = vertex_v["vertex_spin_velocity"]
+    vertex = contours_db.get_data("multipole-vertex-sum", EF=EF)["vertex"]
+    ahc = cached_einsum('lma, mnb, nl->ab', vtau, vtau, vertex).imag
+    return ahc
+
+def get_SHC_multipole(contours_db, EF, gamma_0 = 1e-8):
+    vertex_v = contours_db.get_data("multipole-vtau-sum", EF=EF)
+    vtau = vertex_v["vertex_velocity"]
+    vertex_sv = vertex_v["vertex_spin_velocity"]
+    vertex = contours_db.get_data("multipole-vertex-sum", EF=EF)["vertex"]
+    # print (f"{EF=}, {gamma_0=}, vertex shape={vertex.shape}, vtau shape={vtau.shape}, vertex_sv shape={vertex_sv.shape}")
+    shc = cached_einsum('lma, mnb, nl->ab', vertex_sv, vtau, vertex).imag
+    return shc

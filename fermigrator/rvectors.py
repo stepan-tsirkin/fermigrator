@@ -23,9 +23,9 @@ class Rvectors2(Rvectors):
         # inverse FFT is defined as A_q = 1/N_R sum_R A_R exp(i q R)
         Nq = np.prod(self.mp_grid)
         AA_qq_mp = execute_fft(AA_qq_mp, axes=(
-            0, 1, 2), fftlib=self.fftlib_q2R, destroy=False, inverse=False) / Nq
+            0, 1, 2), fftlib=self.fftlib_q2R, destroy=False, inverse=True)
         AA_qq_mp = execute_fft(AA_qq_mp, axes=(
-            3, 4, 5), fftlib=self.fftlib_q2R, destroy=False, inverse=True)
+            3, 4, 5), fftlib=self.fftlib_q2R, destroy=False, inverse=False) / Nq
         # A_RR' = 1/N_q^2 sum_{q,q'} A_qq' exp(i q R) exp(- i q' R')
         # return AA_qq_mp.reshape( (Nq, Nq) + shapeA )
         return self.remap_XX_from_grid_to_list_RR(AA_qq_mp)
@@ -38,8 +38,8 @@ class Rvectors2(Rvectors):
         dim_k_left = kpt_red_left.shape[1]
         dim_k_right = kpt_red_right.shape[1]
         # print (f"RR_to_kk: AA_RR shape {AA_RR.shape}, kpt_red_left shape {kpt_red_left.shape}, kpt_red_right shape {kpt_red_right.shape}")
-        exp_left = np.exp(2j * np.pi * self.iRvec[:, :dim_k_left] @ kpt_red_left.T)
-        exp_right = np.exp(-2j * np.pi * self.iRvec[:, :dim_k_right] @ kpt_red_right.T)
+        exp_left = np.exp(-2j * np.pi * self.iRvec[:, :dim_k_left] @ kpt_red_left.T)
+        exp_right = np.exp(2j * np.pi * self.iRvec[:, :dim_k_right] @ kpt_red_right.T)
         return cached_einsum('Rk, Rr..., rq->kq...', exp_left, AA_RR, exp_right)
 
     def remap_XX_from_grid_to_list_RR(self, XX_RR_grid):

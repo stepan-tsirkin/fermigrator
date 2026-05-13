@@ -15,7 +15,9 @@ for k in ["fermi", "cell", "nspin", "wannier_centres"]:
 reorder = [0, 2, 1, 3]
 N_supercell = 36
 
-Vkk = elements["V_total"][:, :, reorder, :][:, :, :, reorder] * Hartree * N_supercell
+Vkk = elements["V_total"]
+nk = Vkk.shape[0]
+Vkk = Vkk.reshape(nk, nk, 2, 2, 2, 2).transpose(0, 1, 3, 2, 5, 4) / Hartree * N_supercell
 db = ContourDatabase.read("contours")
 system = db.system
 print(f"System has {system.num_wann} wannier functions with centers at {system.wannier_centers_red} in reduced coordinates and real lattice vectors {system.real_lattice}")

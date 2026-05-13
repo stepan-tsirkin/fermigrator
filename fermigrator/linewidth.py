@@ -31,9 +31,8 @@ def get_linewidth_Efermi(contours_db, EF):
     contour_dict = {contours_db.split_filename(f)["ib"]: f for f in files_contour}
     linewidth_dict = {}
     for ib, file_contour in contour_dict.items():
-        contour1 = np.load(file_contour)
-        linewidth_dict[ib] = np.zeros(
-            contour1["kpoints"].shape[0], dtype=float)
+        # contour1 = np.load(file_contour)
+        linewidth_dict[ib] = 0
         for ib2 in contour_dict.keys():
             print(
                 f"Calculating linewidth for Efermi={EF} using contours for ib1={ib} and ib2={ib2}")
@@ -43,8 +42,9 @@ def get_linewidth_Efermi(contours_db, EF):
             Vkk_conj = contours_db.get_data(
                 typ="Vkk", ib1=ib2, ib2=ib, EF=EF, none_if_missing=False)["Vkk"]
             assert np.allclose(
-                Vkk, Vkk_conj.conj().T), f"Vkk file for ib1={ib}, ib2={ib2} and Efermi={EF} is not the conjugate transpose of the Vkk file for ib1={ib2}, ib2={ib} and Efermi={EF}, skipping this pair"
-            linewidth = cached_einsum('kq,q,qk->k', Vkk, w, Vkk_conj).real
+                Vkk, Vkk_conj.conj().transpose(1,0,3,2)), f"Vkk file for ib1={ib}, ib2={ib2} and Efermi={EF} is not the conjugate transpose of the Vkk file for ib1={ib2}, ib2={ib} and Efermi={EF}, skipping this pair"
+            linewidth = cached_einsum('kqst,q,qkts->ks', Vkk, w, Vkk_conj).real
+            print(f"{Vkk.shape=}, {w.shape=}, {Vkk_conj.shape=}, linewidth shape={linewidth.shape}")
             print(
                 f"Linewidth for ib1={ib}, ib2={ib2} and Efermi={EF} has min {linewidth.min()} and max {linewidth.max()}")
             # contours_db.set_data("linewidth", dict(linewidth=linewidth, kpoints=contour1["kpoints"], weights=contour1["weights"]),
@@ -119,6 +119,7 @@ def get_linewidth_multipole_Efermi(contours_db, EF):
         multipole_eigen = contours_db.get_data(typ="multipole-eigen", ib=ib, EF=EF)
         mult_e = multipole_eigen["eigenvalues"]
         mult_W = multipole_eigen["eigenvectors"]    
-        linewidths_dict[ib] = cached_einsum('l, lks, lm, mks -> ks', mult_e, mult_W, vertex, mult_W.conj()).real
+        linewidths_dict[ib] = cached_einsum(' mks, lks, l, lm-> ks',
+                                            mult_W.conj(), mult_W, mult_e, vertex).real
         contours_db.set_data("linewidth-multipole", dict(linewidth=linewidths_dict[ib]), ib=ib, EF=EF)
     return linewidths_dict

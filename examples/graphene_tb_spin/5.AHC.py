@@ -1,6 +1,6 @@
 import numpy as np
 from fermigrator.database import ContourDatabase
-from fermigrator.skew import get_AHC_multipole, get_all_multipole_vtau
+from fermigrator.skew import get_AHC_multipole, get_SHC_multipole, get_all_multipole_vtau
 
 EF0 = np.load("efermi.npz")["EF"]
 V0=3
@@ -14,10 +14,11 @@ get_all_multipole_vtau(contour_db, gamma_0 = 1e-8)
 print (f"Available Efermi values in the database: {Efermi}")
 
 AHC_list = []
+SHC_list = []
 
 for EF in Efermi:
-    AHC = get_AHC_multipole(contour_db, EF)
-    AHC_list.append(AHC)
+    AHC_list.append(get_AHC_multipole(contour_db, EF))
+    SHC_list.append(get_SHC_multipole(contour_db, EF))
 
 AHC_list = np.array(AHC_list)
 

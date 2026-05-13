@@ -87,9 +87,8 @@ def get_AHC(contours_db, EF, gamma_0 = 1e-8):
 
 
 def get_multipole_vtau(contours_db, EF, ib, gamma_0 = 1e-8):
-    print (f"Calculating multipole vertex on contour for Efermi={EF} and band index ib={ib} with gamma_0={gamma_0}")
-    from wannierberri.utility import pauli_x, pauli_y, pauli_z
-    pauli = np.array([pauli_x, pauli_y, pauli_z]) 
+    # print (f"Calculating multipole vertex on contour for Efermi={EF} and band index ib={ib} with gamma_0={gamma_0}")
+    pauli_z = np.array([[1, 0], [0, -1]])
     contour = contours_db.get_data("contour", ib=ib, EF=EF, none_if_missing=False)
     weight = contour["weights"]
     multipole_eigen = contours_db.get_data(typ="multipole-eigen", ib=ib, EF=EF)
@@ -100,10 +99,11 @@ def get_multipole_vtau(contours_db, EF, ib, gamma_0 = 1e-8):
     grad = contour["grad"]
     gamma = contours_db.get_data(typ="linewidth-multipole", ib=ib, EF=EF, none_if_missing=False)["linewidth"]
     gamma = np.maximum(gamma, gamma_0)
-    vtau = grad[:,:,None] / gamma[:, None, :]
-    vertex_velocity = cached_einsum('lks, k, mks , m, kbs-> lmb', mult_W.conj(), weight, mult_W, mult_e, vtau)
-    # vertex_spin = cached_einsum('lks, k, mkt , m, ast-> lma', mult_W.conj(), weight, mult_W, mult_e, pauli)
-    vertex_spin_velocity = cached_einsum('lks, k, mkt , m, cst, kas-> lmac', mult_W.conj(), weight, mult_W, mult_e, pauli, vtau)
+    vtau = grad[:,None, :] / gamma[:,  :, None]
+    vertex_velocity = cached_einsum('lks, k, mks , m, ksa-> lma', 
+                                    mult_W.conj(), weight, mult_W, mult_e, vtau)
+    vertex_spin_velocity = cached_einsum('lks, k, mks , m, ss, ksa-> lma', 
+                                         mult_W.conj(), weight, mult_W, mult_e, pauli_z, vtau)
     contours_db.set_data("multipole-vtau", dict(vertex_velocity=vertex_velocity, vertex_spin_velocity=vertex_spin_velocity), ib=ib, EF=EF)
     return vertex_velocity, vertex_spin_velocity
 
@@ -115,7 +115,7 @@ def get_all_multipole_vtau(contours_db, EF=None, gamma_0 = 1e-8):
             get_all_multipole_vtau(contours_db, EF=EF, gamma_0=gamma_0)
         return
     iblist = contours_db.get_all_bands(EF)
-    print (f"Calculating multipole vertex on contours for Efermi={EF} and all bands {iblist} with gamma_0={gamma_0}")
+    # print (f"Calculating multipole vertex on contours for Efermi={EF} and all bands {iblist} with gamma_0={gamma_0}")
     vertex_velocity_sum = 0
     vertex_spin_velocity_sum = 0
     for ib in iblist:
@@ -130,6 +130,14 @@ def get_AHC_multipole(contours_db, EF, gamma_0 = 1e-8):
     vtau = vertex_v["vertex_velocity"]
     # vertex_sv = vertex_v["vertex_spin_velocity"]
     vertex = contours_db.get_data("multipole-vertex-sum", EF=EF)["vertex"]
-    print (f"{EF=}, {gamma_0=}, vertex shape={vertex.shape}, vtau shape={vtau.shape}")
     ahc = cached_einsum('lma, mnb, nl->ab', vtau, vtau, vertex).imag
     return ahc
+
+def get_SHC_multipole(contours_db, EF, gamma_0 = 1e-8):
+    vertex_v = contours_db.get_data("multipole-vtau-sum", EF=EF)
+    vtau = vertex_v["vertex_velocity"]
+    vertex_sv = vertex_v["vertex_spin_velocity"]
+    vertex = contours_db.get_data("multipole-vertex-sum", EF=EF)["vertex"]
+    # print (f"{EF=}, {gamma_0=}, vertex shape={vertex.shape}, vtau shape={vtau.shape}, vertex_sv shape={vertex_sv.shape}")
+    shc = cached_einsum('lma, mnb, nl->ab', vertex_sv, vtau, vertex).imag
+    return shc

@@ -97,11 +97,21 @@ class ScatteringMatrix:
         Vrrab = Vabcrr[:, :, 0, :, :].transpose(2, 3, 0, 1)
         return cls(rvec=rvectors, Vrrab=Vrrab)
 
-    def set_VRR(self, Vrrab, irvec1, irvec2, a=slice(None), b=slice(None), s1=slice(None), s2=slice(None)):
+    def set_VRR(self, Vrrab, irvec1, irvec2, 
+                a=slice(None), b=slice(None), s1=slice(None), s2=slice(None), 
+                add=True,
+                add_Herm_conj=True):
         assert self.Vrrab is not None, "Vrrab is not set, please initialize the scattering matrix with Vrrab or num_wann first"
         ir1 = self.rvec.iR(irvec1)
         ir2 = self.rvec.iR(irvec2)
-        self.Vrrab[ir1, ir2, a, b, s1, s2] = Vrrab
+        if add:
+            self.Vrrab[ir1, ir2, a, b, s1, s2] += Vrrab
+        else:
+            self.Vrrab[ir1, ir2, a, b, s1, s2] = Vrrab
+        if add_Herm_conj and not ( ir1==ir2 and a==b and s1==s2):
+            Vrrab = np.asarray(Vrrab)
+            V_hc = Vrrab.conj().transpose(*np.arange(Vrrab.ndim)[::-1])            
+            self.Vrrab[ir2, ir1, b, a, s2, s1] += V_hc
  
     def as_dict(self):
         dict = {}
@@ -181,7 +191,7 @@ class ScatteringMatrix:
         assert (u_left is None) == (
             u_right is None), "u_left and u_right must be both None or both not None"
         if u_left is not None:
-            return cached_einsum('ka,kqab,qb->kq',
+            return cached_einsum('ka,kqabst,qb->kqst',
                                  u_left.conj(), Vkk, u_right)
         else:
             return Vkk
@@ -261,15 +271,28 @@ class ScatteringMatrix:
             Relative cutoff; -1 keeps all modes.
         """
         assert self.Vrrab is not None, "Vrrab is not set, please set it first using set_RR"
-        Vrarb = self.Vrrab.transpose(0, 2, 4, 1, 3, 5).reshape(
-            self.rvec.nRvec * self.num_wann * self.nspin, self.rvec.nRvec * self.num_wann * self.nspin)
-        e, v = np.linalg.eigh(Vrarb)
+        nR = self.rvec.nRvec
+        nw = self.num_wann
+        ns = self.nspin
+        size = nR * nw * ns
+        nonzeros = np.where(np.abs(self.Vrrab) > 1e-15)
+        for ir1, ir2, a, b, s1, s2 in zip(*nonzeros):
+            v = self.Vrrab[ir1, ir2, a, b, s1, s2]
+            delta_red = self.rvec.iRvec[ir1] - self.rvec.iRvec[ir2] + self.rvec.shifts_left_red[a] - self.rvec.shifts_right_red[b]
+            
+            delta_cart = delta_red @ self.rvec.lattice
+            print (f"Vrrab[{ir1}, {ir2}, {a}, {b}, {s1}, {s2}] = {v} with delta_red = {delta_red}, delta_cart = {delta_cart}, R1={self.rvec.iRvec[ir1]}, R2={self.rvec.iRvec[ir2]} and wannier centers {self.rvec.shifts_right_red[a]}, {self.rvec.shifts_right_red[b]} and spins {s1}, {s2}")
+        Vrasrbt = self.Vrrab.transpose(0, 2, 4, 1, 3, 5).reshape(size, size)
+        # print (f"Performing multipole decomposition of Vrasrbt with \n {Vrasrbt}")
+        
+        assert np.allclose(Vrasrbt, Vrasrbt.conj().T), "Vrrab is not Hermitian, cannot perform multipole decomposition"
+        e, v = np.linalg.eigh(Vrasrbt)
         srt = np.argsort(-abs(e))
         e = e[srt]
         if abs(e[0]) < 1e-15:
             print("Warning: the largest eigenvalue is smaller than 1e-15, which may indicate that the scattering matrix is not properly set or that the system is very weakly scattering")
-            self._multipole_eigenvalues = np.zeros(0)
-            self._multipole_eigenvectors = np.zeros((0, self.rvec.nRvec, self.num_wann, self.nspin))
+            self._multipole_eigenvalues = np.zeros(0, dtype=float)
+            self._multipole_eigenvectors = np.zeros((0, nR, nw, ns), dtype=complex)
         else:
             nselect = max(np.where(abs(e)/abs(e[0]) > select_threshold)[0] + 1)
             e = e[:nselect]
@@ -277,6 +300,13 @@ class ScatteringMatrix:
             self._multipole_eigenvalues = e
             self._multipole_eigenvectors = v.T.reshape(
                 nselect, self.rvec.nRvec, self.num_wann, self.nspin)
+            
+        Vrasrbt_recon = cached_einsum('xl, yl, l ->  xy', v, v.conj(), e)
+        assert np.allclose(Vrasrbt_recon, Vrasrbt), f"Multipole decomposition reconstruction does not match original Vrasrbt, max difference is {np.max(np.abs(Vrasrbt_recon - Vrasrbt))}"
+        v = self._multipole_eigenvectors
+        e = self._multipole_eigenvalues
+        Vrrab_recon = cached_einsum('lRas, lrbt, l -> Rrabst', v, v.conj(), e)
+        assert np.allclose(Vrrab_recon, self.Vrrab), f"Multipole decomposition reconstruction does not match original Vrrab, max difference is {np.max(np.abs(Vrrab_recon - self.Vrrab))}"
         return self._multipole_eigenvalues, self._multipole_eigenvectors
 
     def get_multipole_on_contour(self, file, contours_db=None):
@@ -285,7 +315,7 @@ class ScatteringMatrix:
         For each eigenmode φ_l with eigenvalue λ_l, evaluates the overlap
         with the Bloch wavefunctions on the contour:
 
-            W_l(k) = Σ_{R,a} φ_l^{Ra} e^{-ik·R} u_a(k)
+            W_l(k) = Σ_{R,a} φ_l^{Ra} e^{ik·R} u_a(k)
 
         and computes two quantities saved under ``multipole-vertex``:
 
@@ -297,7 +327,7 @@ class ScatteringMatrix:
         Parameters
         ----------
         file : str
-            Path to a contour .npz file (must contain kpoints, wavefunctions, weights).
+            Path to a contour .npz file (must contain kpoints,set_torque_operators_R wavefunctions, weights).
         contours_db : ContourDatabase, optional
             If provided, results are saved under the ``multipole-vertex`` type.
         """
@@ -305,16 +335,13 @@ class ScatteringMatrix:
             kpoints = f["kpoints"]
             wavefunctions = f["wavefunctions"]
             weight = f["weights"]
-            grad = f["grad"] 
+            
 
         v = self.multipole_eigenvectors
         e = self.multipole_eigenvalues
         
-        from wannierberri.utility import pauli_x, pauli_y, pauli_z
-        pauli = np.array([pauli_x, pauli_y, pauli_z]) 
-
         exp = np.exp(-2j * np.pi * self.rvec.iRvec[:, :2] @ kpoints.T)
-        W = cached_einsum('lRas, Rk, ka -> lks', v, exp, wavefunctions)
+        W = cached_einsum('lRas, Rk, ka -> lks', v, exp, wavefunctions.conj())
         vertex = cached_einsum('lks, k, mks , m-> lm', W.conj(), weight, W, e)
         
         if contours_db is not None:
@@ -330,14 +357,12 @@ class ScatteringMatrix:
         """Compute and save multipole vertex/projector for all contours at each Fermi level."""
         if Efermi_list is None:
             Efermi_list = contours_db.get_all_Efermi()
-        print(
-            f"Calculating multipole vertex on contours for Efermi_list={Efermi_list}")
+        # print(f"Calculating multipole vertex on contours for Efermi_list={Efermi_list}")
         for Efermi in Efermi_list:
             file_list = contours_db.get_files_Efermi("contour", Efermi)
             vertex = 0
             for f in file_list:
-                print(
-                    f"Calculating multipole vertex on contour for Efermi={Efermi} using file {f}")
+                # print(f"Calculating multipole vertex on contour for Efermi={Efermi} using file {f}")
                 ver, _, __ = self.get_multipole_on_contour(f, contours_db=contours_db)
                 vertex += ver
             contours_db.set_data("multipole-vertex-sum", dict(vertex=vertex), EF=Efermi)

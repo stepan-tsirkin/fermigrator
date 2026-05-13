@@ -16,10 +16,11 @@ except FileNotFoundError:
 
 # path, bands = db.system.get_bandstructure()
 # bands.plot_path_fat(path=path, save_file="bands.png")
-grid = wb.Grid(db.system, NK=(96, 96, 1), NKFFT=(12, 12, 1))
+grid = wb.Grid(db.system, NK=(300, 300, 1), NKFFT=(12, 12, 1))
 db.evaluate_E_grid(grid=grid, ignore_existing=True)
 EF0 = np.load("efermi.npz")["EF"]
-get_contours_and_WFs(contours_db=db,
-                     Efermi_list=np.linspace(EF0-3, EF0+3, 61),
-                     ignore_existing=False
-                     )
+for s in +1, -1:
+    get_contours_and_WFs(contours_db=db,
+                        Efermi_list=np.linspace(EF0+s*5, EF0+s*1, 41),
+                        ignore_existing=False
+                        )

@@ -6,6 +6,25 @@ from wannierberri.utility import cached_einsum
 
 class Rvectors2(Rvectors):
 
+    def __init__(self, shifts_center_red=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if shifts_center_red is not None:
+            shifts_center_red = np.array(shifts_center_red, dtype=float)
+            if shifts_center_red.ndim == 1:
+                shifts_center_red = shifts_center_red[None, :]
+            assert shifts_center_red.ndim == 2 and shifts_center_red.shape[1] == 3, f"shifts_center_red should be a 2D array with shape (num_wann, 3), but got shape {shifts_center_red.shape}"
+            self.shifts_center_red = shifts_center_red
+        else:
+            self.shifts_center_red = np.zeros((1,3), dtype=float)
+
+    @property
+    def nshifts_center(self):
+        """
+        Return the number of center shifts.
+        """
+        return self.shifts_center_red.shape[0]
+
+
     @classmethod
     def from_Rvectors(cls, Rvecs):
         self = cls.__new__(cls)
@@ -55,7 +74,7 @@ class Rvectors2(Rvectors):
 
         Returns
         -------
-        XX_R_new : np.ndarray(shape=(num_wann_r, num_wann_l, num_wann_r, nRvec, nRvec, ...))
+        XX_R_new : np.ndarray(shape=(nRvec, nRvec, num_wann_r, num_wann_l, num_wann_r,  ...))
             The matrix in the list of R-vectors representation.
         """
         XX_RR_sum_grid = XX_RR_grid.sum(axis=(0, 1, 2, 3, 4, 5))
@@ -65,15 +84,15 @@ class Rvectors2(Rvectors):
             f"remapping {XX_RR_grid.shape} num_wann_r={num_wann_r}, num_wann_l={num_wann_l}")
         nl = self.nshifts_left
         nr = self.nshifts_right
+        nc = self.nshifts_center
         assert (nr == 1) or (
             XX_RR_grid.shape[6] == nr), f"XX_RR_grid {XX_RR_grid.shape} should have {nr} WFs"
-        assert (nr == 1) or (
-            XX_RR_grid.shape[7] == nr), f"XX_RR_grid {XX_RR_grid.shape} should have {nr} WFs"
         assert (nl == 1) or (
-            XX_RR_grid.shape[8] == nl), f"XX_RR_grid {XX_RR_grid.shape} should have {nl} right shifts"
+            XX_RR_grid.shape[7] == nl), f"XX_RR_grid {XX_RR_grid.shape} should have {nl} right shifts"
+        assert (nc == 1) or (
+            XX_RR_grid.shape[8] == nc), f"XX_RR_grid {XX_RR_grid.shape} should have {nc} center shifts"
 
-        shape_new = XX_RR_grid.shape[6:9] + \
-            (self.nRvec,) * 2 + XX_RR_grid.shape[9:]
+        shape_new = (self.nRvec,) * 2 + XX_RR_grid.shape[6:]
         print(f"shape_new {shape_new}")
         XX_RR_new = np.zeros(shape_new, dtype=XX_RR_grid.dtype)
         for a in range(num_wann_r):
@@ -91,9 +110,9 @@ class Rvectors2(Rvectors):
                         for iRi2, iRm2, nd2 in zip(self.iRvec_index_list[ishift2],
                                                    self.iRvec_mod_list[ishift2],
                                                    self.Ndegen_list[ishift2]):
-                            XX_RR_new[a, b, c, iRi1, iRi2] += XX_RR_grid[tuple(
+                            XX_RR_new[iRi1, iRi2, a, b, c] += XX_RR_grid[tuple(
                                 iRm1) + tuple(iRm2) + (a, b, c)] / (nd1 * nd2)
-        XX_R_sum_new = XX_RR_new.sum(axis=(3, 4))
+        XX_R_sum_new = XX_RR_new.sum(axis=(0,1))
         assert np.allclose(
             XX_R_sum_new, XX_RR_sum_grid), f"XX_R_sum_R_new {XX_R_sum_new} != XX_R_sum_T_tmp {XX_RR_sum_grid}"
         return XX_RR_new

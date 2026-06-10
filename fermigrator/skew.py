@@ -43,6 +43,20 @@ def get_Wkk_Efermi(contours_db, EF):
     return skew_dict
 
 
+
+
+
+
+# Let's figure out the factor for AHC. 
+# Internally, we calculate sigma_{ab} = Sum_{k,k',k''} Im[ V_{nk,mk'} V_{mk',rq} V_{rq,nk} ] 
+#     w_{k} w_{k'} w_q * (v_{nk}^a  v_{mk'}^b / gamma_{nk} / gamma_{mk'})
+#   w_k are in units eV^{-1} Angstrom^{-2} (from the contour integration)
+#   v_{mk} are in units eV* Angstrom
+#   V_{nk,mk'} are in units of eV
+# So, the sum is in units of eV^3 * 1/eV^3 * (eV*Angstrom)^2 * 1/eV^2 = Angstrom^2
+
+
+
 def get_AHC(contours_db, EF, gamma_0 = 1e-8):
     """Computes the anomalous Hall conductivity (AHC) from the skew scattering matrix Wkk
 
@@ -79,7 +93,7 @@ def get_AHC(contours_db, EF, gamma_0 = 1e-8):
             vtau_m = vm/ gamma_m[:, None]
             Wkk = contours_db.get_data(typ="Wkk", ib1=n, ib2=m, EF=EF, none_if_missing=False)["Wkk"]
             ahc += cached_einsum('ka,kp,pb->ab', vtau_n, Wkk, vtau_m).real
-    return ahc
+    return ahc * factor_ahc
 
 
 

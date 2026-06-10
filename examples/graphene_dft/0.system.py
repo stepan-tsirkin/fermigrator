@@ -19,7 +19,7 @@ calculators = {"dos": DOS(Efermi=EF, tetra=True),
 result = run(system=system, calculators=calculators, grid=grid)
 cumdos = result.results["cumdos"].data
 
-EF0 = EF[np.argmin(np.abs(cumdos - 2))]
+EF0 = EF[np.argmin(np.abs(cumdos - 1))]
 
 np.savez("efermi.npz", EF=EF0, cumdos=cumdos)
 

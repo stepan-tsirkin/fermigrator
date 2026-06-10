@@ -18,15 +18,12 @@ class ScatteringMatrix:
                  ):
         self.rvec = Rvectors2.from_Rvectors(rvec)
         if Vrrab is not None:
+            assert Vrrab.ndim in [4, 6], f"Vrrab should be a 4D or 6D array with shape (nRvec, nRvec, num_wann, num_wann) or (nRvec, nRvec, num_wann, num_wann, nspin, nspin), but got shape {Vrrab.shape}"
             if Vrrab.ndim == 4:
-                nspin = 1
-                assert Vrrab.shape == (rvec.nRvec, rvec.nRvec, self.num_wann,
-                                   self.num_wann), f"Vrrab should have shape (nRvec, nRvec, num_wann, num_wann), but got {Vrrab.shape}"
-                num_wann = Vrrab.shape[2]// nspin
-                Vrrab = Vrrab.reshape(self.rvec.nRvec, self.rvec.nRvec, num_wann, nspin, num_wann, nspin).transpose(0, 1, 2, 4, 3, 5)
-            elif Vrrab.ndim == 6:
-                nspin = Vrrab.shape[4]
-                assert Vrrab.shape == (rvec.nRvec, rvec.nRvec, num_wann, num_wann, nspin, nspin), f"Vrrab should have shape (nRvec, nRvec, num_wann, num_wann, nspin, nspin), but got {Vrrab.shape}"
+                Vrrab = Vrrab[:, :, :, :, None, None]
+            nspin = Vrrab.shape[4]
+            num_wann = Vrrab.shape[2]
+            assert Vrrab.shape == (rvec.nRvec, rvec.nRvec, num_wann, num_wann, nspin, nspin), f"Vrrab should have shape (nRvec={rvec.nRvec}, nRvec, num_wann={num_wann}, num_wann, nspin={nspin}, nspin={nspin}), but got {Vrrab.shape}"
             self.Vrrab = Vrrab
             diff = Vrrab - Vrrab.transpose(1, 0, 3, 2, 5, 4).conj()
             max_diff = np.max(np.abs(diff))
@@ -66,14 +63,14 @@ class ScatteringMatrix:
             Wannier function centres in reduced coordinates.
         real_lattice : array (3, 3)
             Real-space lattice vectors in Å.
-        rvectors : Rvectors, optional
+        rvectors : Rvectors, optinum_wann, nspin, num_wann, nspin) and we need to transpose to get the usual order of indicesonal
             Pre-built Rvectors object; overrides the lattice/grid parameters.
         mp_grid : array (3,)
             Monkhorst–Pack grid dimensions used in the Wannier90 calculation.
         kpt_red : array (NK, 3)
             k-points in reduced coordinates matching the rows of Vkkmn_wan.
         """
-        assert Vkkmn_wan.ndim == 6, f"Vkkmn_wan must be a 6D array with shape (NK, NK, NW, NSPIN, NW, NSPIN), but got shape {Vkkmn_wan.shape}"
+        assert Vkkmn_wan.ndim == 6, f"Vkkmn_wan must be a 6D array with shape (NK, NK, NW, NW, NSPIN, NSPIN), but got shape {Vkkmn_wan.shape}"
         assert Vkkmn_wan.shape[0] == Vkkmn_wan.shape[
             1], f"The first two dimensions of Vkkmn_wan must be the same, but got {Vkkmn_wan.shape[0]} and {Vkkmn_wan.shape[1]}"
         assert Vkkmn_wan.shape[2] == Vkkmn_wan.shape[
@@ -87,14 +84,15 @@ class ScatteringMatrix:
         if rvectors is None:
             rvectors = Rvectors2(
                 lattice=real_lattice,
-                shifts_left_red=[center_red],
+                shifts_left_red=wannier_centers_red,
                 shifts_right_red=wannier_centers_red,
+                shifts_center_red=center_red,
             )
             rvectors.set_Rvec(mp_grid=mp_grid)
             rvectors.set_fft_q_to_R(kpt_red=kpt_red)
 
         Vabcrr = rvectors.qq_to_RR(Vkkmn_wan[:, :, :, :, None])
-        Vrrab = Vabcrr[:, :, 0, :, :].transpose(2, 3, 0, 1)
+        Vrrab = Vabcrr[:, :,  :, :, 0]
         return cls(rvec=rvectors, Vrrab=Vrrab)
 
     def set_VRR(self, Vrrab, irvec1, irvec2, 
@@ -278,12 +276,7 @@ class ScatteringMatrix:
         nonzeros = np.where(np.abs(self.Vrrab) > 1e-15)
         for ir1, ir2, a, b, s1, s2 in zip(*nonzeros):
             v = self.Vrrab[ir1, ir2, a, b, s1, s2]
-            delta_red = self.rvec.iRvec[ir1] - self.rvec.iRvec[ir2] + self.rvec.shifts_left_red[a] - self.rvec.shifts_right_red[b]
-            
-            delta_cart = delta_red @ self.rvec.lattice
-            print (f"Vrrab[{ir1}, {ir2}, {a}, {b}, {s1}, {s2}] = {v} with delta_red = {delta_red}, delta_cart = {delta_cart}, R1={self.rvec.iRvec[ir1]}, R2={self.rvec.iRvec[ir2]} and wannier centers {self.rvec.shifts_right_red[a]}, {self.rvec.shifts_right_red[b]} and spins {s1}, {s2}")
         Vrasrbt = self.Vrrab.transpose(0, 2, 4, 1, 3, 5).reshape(size, size)
-        # print (f"Performing multipole decomposition of Vrasrbt with \n {Vrasrbt}")
         
         assert np.allclose(Vrasrbt, Vrasrbt.conj().T), "Vrrab is not Hermitian, cannot perform multipole decomposition"
         e, v = np.linalg.eigh(Vrasrbt)

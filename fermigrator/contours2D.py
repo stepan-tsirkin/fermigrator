@@ -128,15 +128,15 @@ def get_kpoints_and_weights_FS_2D(energy_grid, reciprocal_lattice_vectors, fermi
         shifts = [[(0, 0), (1, 0), (1, 1)],
                   [(0, 0), (0, 1), (1, 1)]]
 
-    res1 = get_segments_triangle(
-        energy_grid, shifts=shifts[0], below_EF=below_EF, gradient=gradient)
-    res2 = get_segments_triangle(
-        energy_grid, shifts=shifts[1], below_EF=below_EF, gradient=gradient)
-    kpoints = np.vstack([res1[0], res2[0]])
-    weights = np.concatenate([res1[2], res2[2]], axis=0)
-    segments = np.concatenate([res1[1], res2[1]], axis=0)
+    res_list = [get_segments_triangle(
+        energy_grid, shifts=sh, below_EF=below_EF, gradient=gradient) for sh in shifts]
+
+    kpoints = np.vstack([res[0] for res in res_list])
+    weights = np.concatenate([res[2] for res in res_list], axis=0)
+    segments = np.concatenate([res[1] for res in res_list], axis=0)
+
     if gradient:
-        grad = np.hstack((res1[3], res2[3]))
+        grad = np.hstack([res[3] for res in res_list])
         grad = np.dot(np.linalg.inv(reciprocal_lattice_vectors), grad).T
     else:
         grad = None

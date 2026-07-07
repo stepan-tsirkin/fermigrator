@@ -82,6 +82,19 @@ def getDOS(contours_db, EF):
         dos += np.sum(contour["weights"])
     return dos
 
+def getOhmic(contours_db, EF):
+
+    files_contour = contours_db.get_files_Efermi("contour", EF)
+    ohmic = 0
+    for file_contour in files_contour:
+        contour = np.load(file_contour)
+        w = contour["weights"]
+        vn = contour["grad"]
+        ohmic += np.einsum('k,ka,kb->ab', w, vn, vn).real
+    from wannierberri.factors import factor_ohmic
+    ohmic *= factor_ohmic
+    return ohmic
+
 
 def get_linewidth_multipole_Efermi(contours_db, EF):
     """Compute linewidths using the multipole decomposition of the scattering vertex.

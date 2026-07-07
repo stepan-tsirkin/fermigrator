@@ -17,7 +17,6 @@ def get_faces_tetrafedron_n_below(n, energy_grid, shifts, num_below_EF, gradient
     y = np.linspace(0, 1, NK2 + 1, endpoint=True)
     z = np.linspace(0, 1, NK3 + 1, endpoint=True)
     n_below_EF = np.where(num_below_EF == n_loc)
-    # print(f"number of tetrahedrons with {n} vertices below E_F: {len(n_below_EF[0])}")
 
     # the array has shape (4, N) where N is the number of tetrahedrons with n vertices below E_F
     E_n_below_EF = np.array([energy_grid[
@@ -33,29 +32,28 @@ def get_faces_tetrafedron_n_below(n, energy_grid, shifts, num_below_EF, gradient
     # ktetra is (3, N, 4)
     k_tetra = np.array([np.array([xyz[n_below_EF[i] + sh[i]]
                                   for sh in shifts]).T for xyz, i in zip([x, y, z], range(3))])
-    # print(f"ktetra.shape = {k_tetra.shape}, E_n_below_EF.shape = {E_n_below_EF.shape}")
     # Etetra is (N, 4)
     E_tetra = E_n_below_EF.T
 
     srt = np.argsort(E_tetra, axis=1)
-    k_tetra = np.array([np.take_along_axis(k, srt, axis=1) for k in k_tetra])
-    E_tetra = np.take_along_axis(E_tetra, srt, axis=1)
+    k_tetra_srt = np.array([np.take_along_axis(k, srt, axis=1) for k in k_tetra])
+    E_tetra_srt = np.take_along_axis(E_tetra, srt, axis=1)
 
-    e1, e2, e3, e4 = E_tetra[:, 0], E_tetra[:, 1], E_tetra[:, 2], E_tetra[:, 3]
+    e1, e2, e3, e4 = E_tetra_srt[:, 0], E_tetra_srt[:, 1], E_tetra_srt[:, 2], E_tetra_srt[:, 3]
 
     if n_loc == 1:
-        kappa = [(k_tetra[:, :, 0]
-                  + (-E_tetra[:, 0]) /
-                  (E_tetra[:, i] - E_tetra[:, 0])[None, :]
-                  * (k_tetra[:, :, i] - k_tetra[:, :, 0])) for i in (1, 2, 3)]
+        kappa = [(k_tetra_srt[:, :, 0]
+                  + (-E_tetra_srt[:, 0]) /
+                  (E_tetra_srt[:, i] - E_tetra_srt[:, 0])[None, :]
+                  * (k_tetra_srt[:, :, i] - k_tetra_srt[:, :, 0])) for i in (1, 2, 3)]
         k_center = np.mean(kappa, axis=0).T
         c11 = 3 * e1 ** 2 / ((e2 - e1) * (e3 - e1) * (e4 - e1))
         weights = c11
     elif n_loc == 2:
-        kappa = [(k_tetra[:, :, j]
-                  + (-E_tetra[:, j]) /
-                  (E_tetra[:, i] - E_tetra[:, j])[None, :]
-                  * (k_tetra[:, :, i] - k_tetra[:, :, j])) for i in (2, 3) for j in (0, 1)]
+        kappa = [(k_tetra_srt[:, :, j]
+                  + (-E_tetra_srt[:, j]) /
+                  (E_tetra_srt[:, i] - E_tetra_srt[:, j])[None, :]
+                  * (k_tetra_srt[:, :, i] - k_tetra_srt[:, :, j])) for i in (2, 3) for j in (0, 1)]
         k_center = get_center_of_mass_quad(np.array(kappa).transpose(2, 0, 1))
         denom2 = 1. / ((e3 - e1) * (e4 - e1) * (e3 - e2) * (e4 - e2))
         weights = (
@@ -67,8 +65,8 @@ def get_faces_tetrafedron_n_below(n, energy_grid, shifts, num_below_EF, gradient
         raise ValueError(f"n must be 1 or 2, got {n_loc}")
     weights = weights / (NK1 * NK2 * NK3 * 6)
     if gradient:
-        shifts =  np.array(shifts, dtype=int)/np.array([NK1, NK2, NK3])[None, :]
-        shifts1 = np.linalg.inv(shifts[:-1] - shifts[-1][None, :]) 
+        shifts = np.array(shifts, dtype=int) / np.array([NK1, NK2, NK3])[None, :]
+        shifts1 = np.linalg.inv(shifts[:-1] - shifts[-1][None, :])
         E_tetra1 = E_tetra[:, :-1] - E_tetra[:, -1][:, None]
         grad = np.einsum('ij, kj -> ki', shifts1, E_tetra1)
         if reverse_sign:
@@ -83,9 +81,9 @@ def get_faces_tetrahedron(energy_grid, shifts, below_EF, gradient=False):
 
     Each tetrahedron defined by `shifts` crosses the Fermi level if exactly 1, 2 or 3
     of its 4 vertices are below E_F.
-    If two vertices are below E_F, the face is a quadrilateral, which we split into two triangles.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
-    The corners, the center and the integration weight of each triangle are returned,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
-    as well as the Fermi velocity ∇_k E at each triangle center if `gradient=True`.  
+    If two vertices are below E_F, the face is a quadrilateral, which we split into two triangles.
+    The corners, the center and the integration weight of each triangle are returned,
+    as well as the Fermi velocity ∇_k E at each triangle center if `gradient=True`.
 
     its midpoint and integration
     weight are returned.
@@ -109,13 +107,11 @@ def get_faces_tetrahedron(energy_grid, shifts, below_EF, gradient=False):
     shifts = np.array(shifts, dtype=int)
     below_EF_roll = np.array([np.roll(below_EF, (-sh[0], -sh[1], -sh[2]), axis=(0, 1, 2))
                               for sh in shifts])
-    # print(f"below_EF_roll.shape = {below_EF_roll.shape}, below_EF.shape = {below_EF.shape}")
 
     num_below_EF = np.sum(below_EF_roll, axis=0)
     k_center_list = []
     weight_list = []
     grad_list = []
-    # print(f"tetrahedron vertices : \n{shifts}\n")
     for n in (1, 2, 3):
         kc, w, grad = get_faces_tetrafedron_n_below(n, energy_grid, shifts, num_below_EF, gradient=gradient)
         k_center_list.append(kc)
@@ -173,7 +169,6 @@ def get_kpoints_and_weights_FS_3D(energy_grid, reciprocal_lattice_vectors, fermi
     """
     energy_grid = energy_grid.copy() - fermi_level
 
-    print(f"energy_grid.shape = {energy_grid.shape}, reciprocal_lattice_vectors.shape = {reciprocal_lattice_vectors.shape}")
     below_EF = (energy_grid < 0)
     assert reciprocal_lattice_vectors.shape == (3, 3)
     # The coordinates of the vertices of the tetrahedrons which divide a cube into 6 tetrahedrons
@@ -185,7 +180,6 @@ def get_kpoints_and_weights_FS_3D(energy_grid, reciprocal_lattice_vectors, fermi
                        ], dtype=int)
     # now add the opposite tetrahedrons to cover the other half of the cube
     shifts = np.vstack([shifts, 1 - shifts])
-    # print(f"shifts = \n{shifts}")
 
     res_list = [get_faces_tetrahedron(energy_grid, shifts=sh, below_EF=below_EF, gradient=gradient)
                 for sh in shifts]
@@ -193,8 +187,8 @@ def get_kpoints_and_weights_FS_3D(energy_grid, reciprocal_lattice_vectors, fermi
     weights = np.concatenate([res[1] for res in res_list], axis=0)
     if gradient:
         grad = np.vstack([res[2] for res in res_list])
-        grad = np.dot(np.linalg.inv(reciprocal_lattice_vectors), grad.T).T
+        # grad = np.dot(np.linalg.inv(reciprocal_lattice_vectors), grad.T).T
+        grad = np.einsum('aj, kj -> ka', np.linalg.inv(reciprocal_lattice_vectors), grad)
     else:
         grad = None
-    print (f"grad.shape = {grad.shape}")
     return kpoints, None, weights, grad

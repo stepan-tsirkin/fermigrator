@@ -44,7 +44,6 @@ def get_linewidth_Efermi(contours_db, EF):
             assert np.allclose(
                 Vkk, Vkk_conj.conj().transpose(1, 0, 3, 2)), f"Vkk file for ib1={ib}, ib2={ib2} and Efermi={EF} is not the conjugate transpose of the Vkk file for ib1={ib2}, ib2={ib} and Efermi={EF}, skipping this pair"
             linewidth = cached_einsum('kqst,q,qkts->ks', Vkk, w, Vkk_conj).real
-            print(f"{Vkk.shape=}, {w.shape=}, {Vkk_conj.shape=}, linewidth shape={linewidth.shape}")
             print(
                 f"Linewidth for ib1={ib}, ib2={ib2} and Efermi={EF} has min {linewidth.min()} and max {linewidth.max()}")
             # contours_db.set_data("linewidth", dict(linewidth=linewidth, kpoints=contour1["kpoints"], weights=contour1["weights"]),
@@ -82,6 +81,7 @@ def getDOS(contours_db, EF):
         dos += np.sum(contour["weights"])
     return dos
 
+
 def getOhmic(contours_db, EF):
 
     files_contour = contours_db.get_files_Efermi("contour", EF)
@@ -92,7 +92,8 @@ def getOhmic(contours_db, EF):
         vn = contour["grad"]
         ohmic += np.einsum('k,ka,kb->ab', w, vn, vn).real
     from wannierberri.factors import factor_ohmic
-    ohmic *= factor_ohmic
+    system = contours_db.system
+    ohmic *= factor_ohmic / system.cell_volume
     return ohmic
 
 

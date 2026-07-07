@@ -1,6 +1,5 @@
 import numpy as np
 from wannierberri.utility import cached_einsum
-from scipy.constants import hbar
 
 
 def get_Wkk_Efermi(contours_db, EF):
@@ -19,7 +18,7 @@ def get_Wkk_Efermi(contours_db, EF):
     contours_db : ContoursDB
         The database containing the contours and the scattering matrices
     EF : float
-        The Fermi energy at which to compute the skew scattering matrix 
+        The Fermi energy at which to compute the skew scattering matrix
     """
     files_contour = contours_db.get_files_Efermi("contour", EF)
     contour_dict = {contours_db.split_filename(f)["ib"]: f for f in files_contour}
@@ -58,7 +57,7 @@ def get_AHC(contours_db, EF, gamma_0=1e-8):
 
     AHC = (e^2 / hbar) * sum_{nk,mk'} W_{nk,mk'} * (v_{nk} x v_{mk'} * tau_{nk} * tau_{mk'})
 
-    where 
+    where
     - n, m are band indices
     - k, k' are k-point indices
     - W_{nk,mk'} is the skew scattering matrix element between states (n,k) and (m,k')
@@ -69,7 +68,7 @@ def get_AHC(contours_db, EF, gamma_0=1e-8):
     contours_db : ContoursDB
         The database containing the contours and the skew scattering matrices
     EF : float
-        The Fermi energy at which to compute the AHC 
+        The Fermi energy at which to compute the AHC
     """
     files_contour = contours_db.get_files_Efermi("contour", EF)
     contour_dict = {contours_db.split_filename(f)["ib"]: f for f in files_contour}
@@ -89,7 +88,7 @@ def get_AHC(contours_db, EF, gamma_0=1e-8):
             vtau_m = vm / gamma_m[:, None]
             Wkk = contours_db.get_data(typ="Wkk", ib1=n, ib2=m, EF=EF, none_if_missing=False)["Wkk"]
             ahc += cached_einsum('ka,kp,pb->ab', vtau_n, Wkk, vtau_m).real
-    return ahc * factor_ahc
+    return ahc
 
 
 def get_multipole_vtau(contours_db, EF, ib, gamma_0=1e-8):

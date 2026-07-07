@@ -196,7 +196,6 @@ def get_contours_and_WFs(
     contours = {}
     for ib in range(energies_grid.shape[-1]):
         for i, e in enumerate(Efermi_list):
-            print(f"Processing band {ib}, Fermi level {e:.3f} eV ({i + 1}/{len(Efermi_list)})")
             if contours_db.has_contour(ib, e) and not ignore_existing:
                 if return_dict:
                     contours[(ib, e)] = contours_db.get_data(

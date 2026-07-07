@@ -343,12 +343,10 @@ class ScatteringMatrix:
         """Compute and save multipole vertex/projector for all contours at each Fermi level."""
         if Efermi_list is None:
             Efermi_list = contours_db.get_all_Efermi()
-        # print(f"Calculating multipole vertex on contours for Efermi_list={Efermi_list}")
         for Efermi in Efermi_list:
             file_list = contours_db.get_files_Efermi("contour", Efermi)
             vertex = 0
             for f in file_list:
-                # print(f"Calculating multipole vertex on contour for Efermi={Efermi} using file {f}")
                 ver, _, __ = self.get_multipole_on_contour(f, contours_db=contours_db)
                 vertex += ver
             contours_db.set_data("multipole-vertex-sum", dict(vertex=vertex), EF=Efermi)

@@ -92,7 +92,6 @@ class Rvectors2(Rvectors):
             XX_RR_grid.shape[8] == nc), f"XX_RR_grid {XX_RR_grid.shape} should have {nc} center shifts"
 
         shape_new = (self.nRvec,) * 2 + XX_RR_grid.shape[6:]
-        print(f"shape_new {shape_new}")
         XX_RR_new = np.zeros(shape_new, dtype=XX_RR_grid.dtype)
         for a in range(num_wann_r):
             ia = 0 if self.nshifts_right == 1 else a
@@ -102,7 +101,6 @@ class Rvectors2(Rvectors):
                     ic = 0 if self.nshifts_left == 1 else c
                     ishift1 = self.shift_index[ic, ia]
                     ishift2 = self.shift_index[ic, ib]
-                    # print(f"a,b,c = {a},{b},{c} : {ishift1}, {ishift2}")
                     for iRi1, iRm1, nd1 in zip(self.iRvec_index_list[ishift1],
                                                self.iRvec_mod_list[ishift1],
                                                self.Ndegen_list[ishift1]):

@@ -44,7 +44,7 @@ class TabulatorWaveFunction(Tabulator):
         U = data_k.UU_K[:, :, self.iband]
         if isinstance(self.iband, Iterable):
             assert U.ndim == 3 and U.shape[2] == len(self.iband)
-            U =  U.swapaxes(1, 2)
+            U = U.swapaxes(1, 2)
         else:
             assert U.ndim == 2
         return KBandResult(U, transformTR=nevertransform, transformInv=nevertransform)

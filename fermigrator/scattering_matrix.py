@@ -38,7 +38,7 @@ class ScatteringMatrix:
     @property
     def num_wann(self):
         return self.Vrrab.shape[2]
-    
+
     @property
     def nspin(self):
         return self.Vrrab.shape[4]
@@ -92,11 +92,11 @@ class ScatteringMatrix:
             rvectors.set_fft_q_to_R(kpt_red=kpt_red)
 
         Vabcrr = rvectors.qq_to_RR(Vkkmn_wan[:, :, :, :, None])
-        Vrrab = Vabcrr[:, :,  :, :, 0]
+        Vrrab = Vabcrr[:, :, :, :, 0]
         return cls(rvec=rvectors, Vrrab=Vrrab)
 
-    def set_VRR(self, Vrrab, irvec1, irvec2, 
-                a=slice(None), b=slice(None), s1=slice(None), s2=slice(None), 
+    def set_VRR(self, Vrrab, irvec1, irvec2,
+                a=slice(None), b=slice(None), s1=slice(None), s2=slice(None),
                 add=True,
                 add_Herm_conj=True):
         assert self.Vrrab is not None, "Vrrab is not set, please initialize the scattering matrix with Vrrab or num_wann first"
@@ -106,11 +106,11 @@ class ScatteringMatrix:
             self.Vrrab[ir1, ir2, a, b, s1, s2] += Vrrab
         else:
             self.Vrrab[ir1, ir2, a, b, s1, s2] = Vrrab
-        if add_Herm_conj and not ( ir1==ir2 and a==b and s1==s2):
+        if add_Herm_conj and not (ir1 == ir2 and a == b and s1 == s2):
             Vrrab = np.asarray(Vrrab)
-            V_hc = Vrrab.conj().transpose(*np.arange(Vrrab.ndim)[::-1])            
+            V_hc = Vrrab.conj().transpose(*np.arange(Vrrab.ndim)[::-1])
             self.Vrrab[ir2, ir1, b, a, s2, s1] += V_hc
- 
+
     def as_dict(self):
         dict = {}
         for key in ["center_red", "Vrrab", "multipole_threshold",
@@ -155,10 +155,6 @@ class ScatteringMatrix:
     def from_npz(cls, filename):
         dict = np.load(filename)
         return cls.from_dict(dict)
-
-    @property
-    def num_wann(self):
-        return self.Vrrab.shape[2]
 
     def get_on_kpoints(self,
                        kpt_red_left,
@@ -277,7 +273,7 @@ class ScatteringMatrix:
         for ir1, ir2, a, b, s1, s2 in zip(*nonzeros):
             v = self.Vrrab[ir1, ir2, a, b, s1, s2]
         Vrasrbt = self.Vrrab.transpose(0, 2, 4, 1, 3, 5).reshape(size, size)
-        
+
         assert np.allclose(Vrasrbt, Vrasrbt.conj().T), "Vrrab is not Hermitian, cannot perform multipole decomposition"
         e, v = np.linalg.eigh(Vrasrbt)
         srt = np.argsort(-abs(e))
@@ -287,13 +283,13 @@ class ScatteringMatrix:
             self._multipole_eigenvalues = np.zeros(0, dtype=float)
             self._multipole_eigenvectors = np.zeros((0, nR, nw, ns), dtype=complex)
         else:
-            nselect = max(np.where(abs(e)/abs(e[0]) > select_threshold)[0] + 1)
+            nselect = max(np.where(abs(e) / abs(e[0]) > select_threshold)[0] + 1)
             e = e[:nselect]
             v = v[:, srt[:nselect]]
             self._multipole_eigenvalues = e
             self._multipole_eigenvectors = v.T.reshape(
                 nselect, self.rvec.nRvec, self.num_wann, self.nspin)
-            
+
         Vrasrbt_recon = cached_einsum('xl, yl, l ->  xy', v, v.conj(), e)
         assert np.allclose(Vrasrbt_recon, Vrasrbt), f"Multipole decomposition reconstruction does not match original Vrasrbt, max difference is {np.max(np.abs(Vrasrbt_recon - Vrasrbt))}"
         v = self._multipole_eigenvectors
@@ -328,23 +324,20 @@ class ScatteringMatrix:
             kpoints = f["kpoints"]
             wavefunctions = f["wavefunctions"]
             weight = f["weights"]
-            
 
         v = self.multipole_eigenvectors
         e = self.multipole_eigenvalues
-        
+
         exp = np.exp(-2j * np.pi * self.rvec.iRvec[:, :2] @ kpoints.T)
         W = cached_einsum('lRas, Rk, ka -> lks', v, exp, wavefunctions.conj())
         vertex = cached_einsum('lks, k, mks , m-> lm', W.conj(), weight, W, e)
-        
+
         if contours_db is not None:
             ib = contours_db.split_filename(file)["ib"]
             EF = contours_db.split_filename(file)["EF"]
             contours_db.set_data("multipole-vertex", dict(vertex=vertex), ib=ib, EF=EF)
             contours_db.set_data("multipole-eigen", dict(eigenvectors=W, eigenvalues=e), ib=ib, EF=EF)
         return vertex, W, e
-            
-
 
     def get_multipole_on_contours_all(self, contours_db, Efermi_list=None):
         """Compute and save multipole vertex/projector for all contours at each Fermi level."""

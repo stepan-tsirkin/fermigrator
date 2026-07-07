@@ -6,7 +6,7 @@ electronic band structure calculations with WannierBerri.
 """
 
 from .database import ContourDatabase
-from .contours2D import get_segments
+from .contours2D import get_segments_triangle
 from .qpi import *  # noqa: F401, F403
 from .get_band_wavefunction import get_wavefunction_on_kpoints
 from .scattering_matrix import *  # noqa: F401, F403
@@ -16,6 +16,6 @@ __author__ = "Author Name"
 
 __all__ = [
     "ContourDatabase",
-    "get_segments",
+    "get_segments_triangle",
     "get_wavefunction_on_kpoints",
 ]

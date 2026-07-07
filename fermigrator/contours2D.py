@@ -2,7 +2,7 @@ import numpy as np
 from .get_band_wavefunction import get_wavefunction_on_kpoints
 
 
-def get_segments(energy_grid, shifts, below_EF, gradient=False):
+def get_segments_triangle(energy_grid, shifts, below_EF, gradient=False):
     """Extract Fermi surface segments from one triangulation of the BZ.
 
     Each triangle defined by `shifts` crosses the Fermi level if exactly 1 or
@@ -23,7 +23,7 @@ def get_segments(energy_grid, shifts, below_EF, gradient=False):
 
     Returns
     -------
-    gradient=False : (k_center, weight)
+    gradient=False : (k_center, segments, weight)
     gradient=True  : (k_center, segments, weight, grad)
         k_center  : ndarray (N, 2), reduced coordinates of segment midpoints
         segments  : ndarray (N, 2, 2), endpoints of each segment
@@ -37,6 +37,7 @@ def get_segments(energy_grid, shifts, below_EF, gradient=False):
 
     below_EF_roll = np.array([np.roll(below_EF, (-sh[0], -sh[1]), axis=(0, 1))
                               for sh in shifts])
+
     one_below_EF = np.where(np.sum(below_EF_roll, axis=0) == 1)
     E_one_below_EF = np.array([energy_grid[(one_below_EF[0] + sh[0]) % NK1,
                                            (one_below_EF[1] + sh[1]) % NK2]
@@ -71,7 +72,7 @@ def get_segments(energy_grid, shifts, below_EF, gradient=False):
                                           E_triangles[:, 0]) * (E_triangles[:, 2] - E_triangles[:, 0]))
     weight = weight / (2 * NK1 * NK2)
     if not gradient:
-        return k_center, weight
+        return k_center, weight, None, segments
 
     def cyclic_sum(arr1, arr2):
         return sum(arr1[:, i] * (arr2[:, (i + 1) % 3] - arr2[:, (i + 2) % 3]) for i in range(3))
@@ -80,11 +81,11 @@ def get_segments(energy_grid, shifts, below_EF, gradient=False):
                      -cyclic_sum(E_triangles, k_triangles[0])]) / denominator[None, :]
     # because we flipped the sign of the energy for two_below_EF, we flip it again
     grad[:, -num_two_below_EF:] *= -1
-    return k_center, segments, weight, grad
+    return k_center, weight, grad, segments
 
 
-def get_kpoints_and_weights_FS(energy_grid, reciprocal_lattice_vectors, fermi_level,
-                               gradient=False):
+def get_kpoints_and_weights_FS_2D(energy_grid, reciprocal_lattice_vectors, fermi_level,
+                                  gradient=False):
     """Compute Fermi surface k-points and integration weights for one band.
 
     Tiles the 2D BZ with two complementary triangulations (each covering half
@@ -127,19 +128,19 @@ def get_kpoints_and_weights_FS(energy_grid, reciprocal_lattice_vectors, fermi_le
         shifts = [[(0, 0), (1, 0), (1, 1)],
                   [(0, 0), (0, 1), (1, 1)]]
 
-    res1 = get_segments(
+    res1 = get_segments_triangle(
         energy_grid, shifts=shifts[0], below_EF=below_EF, gradient=gradient)
-    res2 = get_segments(
+    res2 = get_segments_triangle(
         energy_grid, shifts=shifts[1], below_EF=below_EF, gradient=gradient)
     kpoints = np.vstack([res1[0], res2[0]])
-    if not gradient:
-        weights = np.concatenate([res1[1], res2[1]], axis=0)
-        return kpoints, weights
     weights = np.concatenate([res1[2], res2[2]], axis=0)
     segments = np.concatenate([res1[1], res2[1]], axis=0)
-    grad = np.hstack((res1[3], res2[3]))
-    grad = np.dot(np.linalg.inv(reciprocal_lattice_vectors), grad)
-    return kpoints, segments, weights, grad.T
+    if gradient:
+        grad = np.hstack((res1[3], res2[3]))
+        grad = np.dot(np.linalg.inv(reciprocal_lattice_vectors), grad).T
+    else:
+        grad = None
+    return kpoints, segments, weights, grad
 
 
 def get_contours_and_WFs(
@@ -177,20 +178,32 @@ def get_contours_and_WFs(
         If True, recompute contours even when they already exist in the database.
     """
     energies_grid, rec_lattice = contours_db.get_E_grid()
+    dim = rec_lattice.shape[0]
+    assert dim in (2, 3), "Only 2D and 3D systems are supported"
+    assert rec_lattice.shape == (dim, dim), "Expected square reciprocal lattice matrix"
+    assert energies_grid.ndim == dim + 1, f"Expected energy grid with {dim} k-space dimensions plus band dimension"
     system = contours_db.system
+    ndim_system = sum(system.periodic)
+    assert ndim_system == dim, f"System periodicity {system.periodic} does not match energy grid dimension {dim}"
+    if dim == 2:
+        get_kpoints_and_weights_FS = get_kpoints_and_weights_FS_2D
+    elif dim == 3:
+        from .contours3D import get_kpoints_and_weights_FS_3D
+        get_kpoints_and_weights_FS = get_kpoints_and_weights_FS_3D
     if Efermi_list is None:
         Efermi_list = np.linspace(
             np.min(energies_grid), np.max(energies_grid), Nfermi)
     contours = {}
-    for ib in range(energies_grid.shape[2]):
+    for ib in range(energies_grid.shape[-1]):
         for i, e in enumerate(Efermi_list):
+            print(f"Processing band {ib}, Fermi level {e:.3f} eV ({i + 1}/{len(Efermi_list)})")
             if contours_db.has_contour(ib, e) and not ignore_existing:
                 if return_dict:
                     contours[(ib, e)] = contours_db.get_data(
                         "contour", ib=ib, EF=e)
                 continue
             centers, segments, weights, grad = get_kpoints_and_weights_FS(
-                energies_grid[:, :, ib], rec_lattice, e, gradient=True)
+                energies_grid[..., ib], rec_lattice, e, gradient=True)
             if len(centers) == 0:
                 if return_empty:
                     contours[(ib, e)] = {"kpoints": centers, "weights": weights,

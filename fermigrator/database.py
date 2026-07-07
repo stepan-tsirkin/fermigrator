@@ -28,7 +28,7 @@ class ContourDatabase:
         num_digits_band : int
             Zero-padded width for band indices in filenames.
         double_spin_system : bool
-            if True, the system is considered to be the same for spin-up and spin-down electrons, so summation over spin will 
+            if True, the system is considered to be the same for spin-up and spin-down electrons, so summation over spin will
             be performed
         """
         self.path = path
@@ -85,7 +85,7 @@ class ContourDatabase:
             k, v = part.split("=")
             res[k] = v
         return res
-    
+
     @cached_property
     def nspin_system(self):
         return 2 if self.double_spin_system else 1
@@ -113,6 +113,7 @@ class ContourDatabase:
 
     def set_data(self, typ, data, **kwargs):
         """Save a dict of arrays to the corresponding .npz file."""
+        data = {k: np.asarray(v) for k, v in data.items()}
         filename = self.get_filename(typ, **kwargs)
         np.savez(filename, **data)
 
@@ -123,7 +124,7 @@ class ContourDatabase:
         """
         filename = self.get_filename(typ, **kwargs)
         if os.path.exists(filename):
-            f = np.load(filename)
+            f = np.load(filename, allow_pickle=True)
             return dict(f)
         else:
             if none_if_missing:
@@ -138,7 +139,7 @@ class ContourDatabase:
             EF = self.split_filename(fname)["EF"]
             Efermi_set.add(EF)
         return Efermi_set
-    
+
     def get_all_Efermi_float(self):
         """Return the set of Fermi energy floats present in the database (from contour files)."""
         Efermi_set = self.get_all_Efermi()
@@ -182,7 +183,7 @@ class ContourDatabase:
             raise FileNotFoundError(
                 "Energies grid not found in database. Please run evaluate_E_grid to compute and save it.")
 
-    def evaluate_E_grid(self, grid, ignore_existing=False):
+    def evaluate_E_grid(self, grid, ignore_existing=False, dim=2):
         """Compute band energies on a k-grid using WannierBerri and save to the database.
 
         Parameters
@@ -193,6 +194,7 @@ class ContourDatabase:
         ignore_existing : bool
             If False (default), return the cached result when one already exists.
         """
+        assert dim in [2, 3], "Only dim=2 and dim=3 are supported, but got dim={dim}"
         if not ignore_existing:
             data = self.get_data("energies_grid")
             if data is not None:
@@ -205,21 +207,25 @@ class ContourDatabase:
         if isinstance(grid, Grid):
             pass
         elif isinstance(grid, int):
-            grid = Grid(self.system, NK=(grid, grid, 1))
+            grid = Grid(self.system, NK=((grid, grid) + (1,) * (3 - dim)))
         elif isinstance(grid, tuple) or isinstance(grid, list) or isinstance(grid, np.ndarray):
-            assert len(grid) == 2, "grid should have length 2 for 2D system"
-            grid = Grid(self.system, NK=(tuple(grid) + (1,)))
+            grid = tuple(grid)
+            if dim == 2:
+                assert len(grid) == dim, "grid tuple should have same length as dim, but got grid={grid} and dim={dim}"
+                grid = grid + (1,) * (3 - dim)
+            grid = Grid(self.system, NK=grid)
         elif isinstance(grid, dict):
             grid = Grid(self.system, **grid)
         else:
             raise ValueError(
                 "grid should be either a wannierberri.Grid/tuple/list/ndarray of NK, or a dict of parameters for Grid")
-        assert grid.dense[2] == 1, "grid should be 2D"
+        if dim == 2:
+            assert grid.dense[2] == 1, "For a 2D system, the grid should have NK[2] = 1, but got NK[2] = {grid.dense[2]}"
         calculators = {"tab": TabulatorAll(tabulators={})}
         results = run(self.system, calculators=calculators, grid=grid)
         energies_grid = results.results["tab"].results["Energy"].data.reshape(
-            tuple(grid.dense[:2]) + (-1,))
-        rec_lattice = self.system.recip_lattice[:2, :2]
+            tuple(grid.dense[:dim]) + (-1,))
+        rec_lattice = self.system.recip_lattice[:dim, :dim]
         self.set_E_grid(energies_grid, rec_lattice)
         return {"energies": energies_grid, "rec_lattice": rec_lattice}
 

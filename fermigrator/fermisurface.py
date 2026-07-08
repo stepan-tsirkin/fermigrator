@@ -1,6 +1,7 @@
 import numpy as np
 from .get_band_wavefunction import get_wavefunction_on_kpoints
 
+
 def get_fermi_surface(
     Efermi_list=None,
     Nfermi=101,
@@ -76,8 +77,8 @@ def get_fermi_surface(
         return contours
 
 
-import numpy as np
 # from wannierberri.grid.tetrahedron import weight_tetrahedron
+
 
 def weights_kappa_2d(k_tetra_srt, E_tetra_srt, n):
     kappa = [(k_tetra_srt[:, :, 0]
@@ -93,22 +94,21 @@ def weights_kappa_2d(k_tetra_srt, E_tetra_srt, n):
     return segments, weight
 
 
-
 def weights_kappa_3d(k_tetra_srt, E_tetra_srt, n):
     e1, e2, e3, e4 = E_tetra_srt[:, 0], E_tetra_srt[:, 1], E_tetra_srt[:, 2], E_tetra_srt[:, 3]
     if n == 1:
         kappa = [(k_tetra_srt[:, :, 0]
-                  + -e1 /(E_tetra_srt[:, i] - e1)[None, :]
-                      * (k_tetra_srt[:, :, i] - k_tetra_srt[:, :, 0])) 
-                            for i in (1, 2, 3)]
+                  + -e1 / (E_tetra_srt[:, i] - e1)[None, :]
+                  * (k_tetra_srt[:, :, i] - k_tetra_srt[:, :, 0]))
+                 for i in (1, 2, 3)]
         triangles = np.array(kappa).transpose(2, 1, 0)
         weights = 3 * e1 ** 2 / ((e2 - e1) * (e3 - e1) * (e4 - e1))
     elif n == 2:
         # case of quadrilateral face, split into two triangles
         kappa = np.array([(k_tetra_srt[:, :, j] + (-E_tetra_srt[:, j]) /
-                            (E_tetra_srt[:, i] - E_tetra_srt[:, j])[None, :]
-                                * (k_tetra_srt[:, :, i] - k_tetra_srt[:, :, j])) 
-                                                    for i in (2, 3) for j in (0, 1)]).transpose(2, 1, 0)
+                           (E_tetra_srt[:, i] - E_tetra_srt[:, j])[None, :]
+                           * (k_tetra_srt[:, :, i] - k_tetra_srt[:, :, j]))
+                          for i in (2, 3) for j in (0, 1)]).transpose(2, 1, 0)
         kappa1 = kappa[:, :, [0, 1, 2]]
         kappa2 = kappa[:, :, [1, 3, 2]]
         w1 = np.linalg.norm(np.cross(kappa1[:, :, 1] - kappa1[:, :, 0], kappa1[:, :, 2] - kappa1[:, :, 0]), axis=1)
@@ -130,7 +130,6 @@ def weights_kappa_3d(k_tetra_srt, E_tetra_srt, n):
     return triangles, weights
 
 
-
 def get_faces_tetrahedron_n_below(n, energy_grid, shifts, num_below_EF, dim):
     if n == dim:
         reverse_sign = True
@@ -148,9 +147,9 @@ def get_faces_tetrahedron_n_below(n, energy_grid, shifts, num_below_EF, dim):
 
     # the array has shape (4, N) where N is the number of tetrahedrons with n vertices below E_F
     E_n_below_EF = np.array([energy_grid[
-        tuple([ (n_below_EF[i] + sh[i]) % NKi[i] for i in range(len(NKi)) ]) ]
-                for sh in shifts])
-    assert E_n_below_EF.shape[0] == dim+1
+        tuple([(n_below_EF[i] + sh[i]) % NKi[i] for i in range(len(NKi))])]
+        for sh in shifts])
+    assert E_n_below_EF.shape[0] == dim + 1
     assert E_n_below_EF.shape[1] == len(n_below_EF[0])
     if reverse_sign:
         E_n_below_EF = -E_n_below_EF
@@ -161,7 +160,7 @@ def get_faces_tetrahedron_n_below(n, energy_grid, shifts, num_below_EF, dim):
     # Etetra is (N, dim+1)
     E_tetra = E_n_below_EF.T
 
-    # srt is (N, dim+1) 
+    # srt is (N, dim+1)
     srt = np.argsort(E_tetra, axis=1)
     k_tetra_srt = np.array([np.take_along_axis(k, srt, axis=1) for k in k_tetra])
     E_tetra_srt = np.take_along_axis(E_tetra, srt, axis=1)
@@ -179,7 +178,7 @@ def get_faces_tetrahedron_n_below(n, energy_grid, shifts, num_below_EF, dim):
     if reverse_sign:
         grad = -grad
     if n_loc == 2:
-        # for the case of quadrilateral faces, we have two triangles per tetrahedron, 
+        # for the case of quadrilateral faces, we have two triangles per tetrahedron,
         # which have the same gradient, so we duplicate the gradients to match the number of triangles
         grad = np.concatenate([grad, grad], axis=0)
     return triangles, weights, grad
@@ -214,12 +213,12 @@ def get_faces(energy_grid, shifts, below_EF, dim):
     """
     # print (f"get_faces_tetrahedron: energy_grid.shape={energy_grid.shape}, shifts={shifts}, below_EF.shape={below_EF.shape}, dim={dim}  ")
     shifts = np.array(shifts, dtype=int)
-    below_EF_roll = np.array([np.roll(below_EF, tuple(-sh), axis=tuple(range(dim) ))
+    below_EF_roll = np.array([np.roll(below_EF, tuple(-sh), axis=tuple(range(dim)))
                               for sh in shifts])
 
     num_below_EF = np.sum(below_EF_roll, axis=0)
     result_list = [get_faces_tetrahedron_n_below(n, energy_grid, shifts, num_below_EF, dim=dim)
-                     for n in range(1, dim + 1)]
+                   for n in range(1, dim + 1)]
     triangles = np.vstack([result[0] for result in result_list])
     weight = np.concatenate([result[1] for result in result_list], axis=0)
     grad = np.vstack([result[2] for result in result_list])
@@ -259,30 +258,30 @@ def get_kpoints_and_weights_FS_ND(energy_grid, reciprocal_lattice_vectors, fermi
     below_EF = (energy_grid < 0)
     assert reciprocal_lattice_vectors.shape == (dim, dim), f"reciprocal_lattice_vectors must be a {dim}x{dim} array, got shape {reciprocal_lattice_vectors.shape}"
 
-    if dim ==2:
+    if dim == 2:
         scal_prod = np.dot(
             reciprocal_lattice_vectors[0], reciprocal_lattice_vectors[1])
         # Choose the triangulation diagonal that avoids cutting across the obtuse
         # angle of the BZ parallelogram (minimises triangle aspect ratio).
         if scal_prod >= 0:
             shifts = [[(0, 0), (1, 0), (0, 1)],
-                    [(1, 0), (0, 1), (1, 1)]]
+                      [(1, 0), (0, 1), (1, 1)]]
         else:
             shifts = [[(0, 0), (1, 0), (1, 1)],
-                    [(0, 0), (0, 1), (1, 1)]]
+                      [(0, 0), (0, 1), (1, 1)]]
     elif dim == 3:
         # The coordinates of the vertices of the tetrahedrons which divide a cube into 6 tetrahedrons
         # first, divide one half of the cube into 3 tetrahedrons
         shifts = np.array([[[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]],
-                        [[0, 0, 1], [1, 0, 0], [0, 1, 0], [1, 0, 1]],
-                        [[0, 0, 1], [0, 1, 1], [0, 1, 0], [1, 0, 1]]
-                        ], dtype=int)
+                           [[0, 0, 1], [1, 0, 0], [0, 1, 0], [1, 0, 1]],
+                           [[0, 0, 1], [0, 1, 1], [0, 1, 0], [1, 0, 1]]
+                           ], dtype=int)
         # now add the opposite tetrahedrons to cover the other half of the cube
         shifts = np.vstack([shifts, 1 - shifts])
 
     res_list = [get_faces(energy_grid, shifts=sh, below_EF=below_EF, dim=dim)
                 for sh in shifts]
-    
+
     triangles = np.concatenate([res[0] for res in res_list], axis=0)
     weights = np.concatenate([res[1] for res in res_list], axis=0)
     grad = np.vstack([res[2] for res in res_list])

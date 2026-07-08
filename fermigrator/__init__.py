@@ -15,6 +15,5 @@ __author__ = "Author Name"
 
 __all__ = [
     "ContourDatabase",
-    "get_segments_triangle",
     "get_wavefunction_on_kpoints",
 ]

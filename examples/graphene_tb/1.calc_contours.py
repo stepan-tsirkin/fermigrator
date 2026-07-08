@@ -3,7 +3,7 @@ import numpy as np
 from fermigrator.contours2D import get_contours_and_WFs
 import wannierberri as wb
 import ray
-ray.init()
+# ray.init()
 
 try:
     db = ContourDatabase.read("contours")
@@ -21,5 +21,6 @@ db.evaluate_E_grid(grid=grid, ignore_existing=True)
 EF0 = np.load("efermi.npz")["EF"]
 get_contours_and_WFs(contours_db=db,
                      Efermi_list=np.linspace(EF0-3, EF0+3, 61),
-                     ignore_existing=False
+                     ignore_existing=False,
+                     get_wf=False,
                      )

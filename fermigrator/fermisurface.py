@@ -4,6 +4,7 @@ import numpy as np
 from propcache import cached_property
 
 from fermigrator.get_fermi_surface import get_faces, get_shifts_2D, get_shifts_3D
+from wannierberri.utility import cached_einsum
 
 
 class FermiSurface:
@@ -12,13 +13,17 @@ class FermiSurface:
                  energy,
                  recip_lattice,
                  triangles,
-                 gradient_abs
+                 gradient_abs,
+                 wavefunctions_center=None,
+                 iband=None
                  ):
         self.energy = energy
         self.recip_lattice = recip_lattice
         assert self.recip_volume > 0, f"reciprocal lattice volume must be positive, got {self.recip_volume}"
         self.triangles = triangles
         self.gradient_abs = gradient_abs
+        self.wavefunctions_center = wavefunctions_center
+        self.iband = iband
 
     @classmethod
     def from_file(cls, filename):
@@ -35,12 +40,9 @@ class FermiSurface:
         return np.linalg.det(self.recip_lattice)
 
     def as_dict(self):
-        return {
-            "energy": self.energy,
-            "recip_lattice": self.recip_lattice,
-            "triangles": self.triangles,
-            "gradient_abs": self.gradient_abs,
-        }
+        keys = ["energy", "recip_lattice", "triangles", "gradient_abs", "wavefunctions_center", "iband"]
+        dic = {key: getattr(self, key) for key in keys if getattr(self, key) is not None}
+        return dic
 
     def to_npz(self, filename):
         np.savez(filename, **self.as_dict())
@@ -49,9 +51,14 @@ class FermiSurface:
     def dim(self):
         return self.recip_lattice.shape[0]
 
-    @property
-    def triangles_cart(self):
-        return self.triangles @ self.recip_lattice
+    @cached_property
+    def centers_red(self):
+        return np.mean(self.triangles, axis=(1))
+
+    def get_wavefunction(self, iband):
+        if self.wavefunctions is None:
+            raise ValueError("Wavefunctions are not available for this Fermi surface.")
+        return self.wavefunctions[:, :, iband]
 
     @property
     def k_centers(self):
@@ -66,6 +73,10 @@ class FermiSurface:
         return len(self.triangles)
 
     @property
+    def triangles_cart(self):
+        return np.einsum('ia, kji -> kja', self.recip_lattice, self.triangles)
+
+    @property
     def basis_vectors_cart(self):
         return self.triangles_cart[:, 1:, :] - self.triangles_cart[:, 0:1, :]
 
@@ -76,14 +87,6 @@ class FermiSurface:
         elif self.dim == 3:
             perp = np.cross(self.basis_vectors_cart[:, 0, :], self.basis_vectors_cart[:, 1, :])
         return perp / np.linalg.norm(perp, axis=1)[:, None]
-
-    @property
-    def normal(self):
-        if self.dim == 2:
-            return np.array([0, 0, 1])
-        elif self.dim == 3:
-            return np.cross(self.triangles_cart[:, 1, :] - self.triangles_cart[:, 0, :],
-                            self.triangles_cart[:, 2, :] - self.triangles_cart[:, 0, :])
 
     @property
     def gradient_cart(self):
@@ -99,7 +102,10 @@ class FermiSurface:
         return (area / self.gradient_abs) / (self.recip_volume)
 
     @classmethod
-    def from_grid(cls, energy_grid, reciprocal_lattice_vectors, fermi_level):
+    def from_grid(cls, energy_grid, reciprocal_lattice_vectors, fermi_level, iband=None,
+                  get_wf=False, system=None):
+        if iband is not None:
+            energy_grid = energy_grid[..., iband]
         dim = energy_grid.ndim
         energy_grid = energy_grid.copy() - fermi_level
         assert reciprocal_lattice_vectors.shape == (dim, dim), f"reciprocal_lattice_vectors must be a {dim}x{dim} array, got shape {reciprocal_lattice_vectors.shape}"
@@ -115,11 +121,21 @@ class FermiSurface:
         gradient_red = np.concatenate([res[1] for res in res_list], axis=0)
         gradient_cart = np.einsum('aj, kj -> ka', np.linalg.inv(reciprocal_lattice_vectors), gradient_red)
         gradient_abs = np.linalg.norm(gradient_cart, axis=1)
+        if get_wf:
+            if system is None:
+                raise ValueError("system must be provided if get_wf is True")
+            kpoints = np.mean(triangles, axis=1)
+            wavefunctions_center = get_wavefunction_on_kpoints(system, kpoints, iband)
+        else:
+            wavefunctions_center = None
+
         return cls(
             energy=fermi_level,
             recip_lattice=reciprocal_lattice_vectors,
             triangles=triangles,
-            gradient_abs=gradient_abs
+            gradient_abs=gradient_abs,
+            iband=iband,
+            wavefunctions_center=wavefunctions_center
         )
 
     def plot(self, ax=None, show=True, **kwargs):
@@ -146,3 +162,24 @@ class FermiSurface:
             ax.set_zlabel("kz")
         if show:
             plt.show()
+
+    def get_wavefunctions_at_centers(self, system):
+        if self.wavefunctions_center is None:
+            self.wavefunctions_center = get_wavefunction_on_kpoints(system, self.kpoints, self.iband)
+        return self.wavefunctions_center
+
+
+def get_wavefunction_on_kpoints(system, kpoints, ibands, batch_size=20):
+    print(f"Evaluating wavefunctions at {len(kpoints)} k-points for band(s) {ibands}...")
+    if len(kpoints) == 0:
+        return np.empty((0, system.num_wann), dtype=np.complex128)
+    iRvec = system.rvec.iRvec
+    H_R = system.get_R_mat("Ham")
+    result = []
+    for i in range(0, len(kpoints), batch_size):
+        k = kpoints[i:i + batch_size]
+        phase = np.exp(1j * (k @ iRvec.T))
+        Hk = cached_einsum("kR,Rij->kij", phase, H_R)
+        evals, evecs = np.linalg.eigh(Hk)
+        result.append(evecs[:, :, ibands])
+    return np.array(np.concatenate(result, axis=0))

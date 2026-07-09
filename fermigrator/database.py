@@ -247,6 +247,7 @@ class ContourDatabase:
                            Efermi_list=None,
                            Nfermi=101,
                            ignore_existing=False,
+                           get_wf=False,
                            ):
         energies_grid, rec_lattice = self.get_E_grid()
         if Efermi_list is None:
@@ -256,5 +257,6 @@ class ContourDatabase:
             for e in Efermi_list:
                 if not self.has_contour(ib, e) or ignore_existing:
                     fermisurf = FermiSurface.from_grid(
-                        energies_grid[..., ib], rec_lattice, e)
+                        energies_grid, rec_lattice, e, iband=ib,
+                        get_wf=get_wf, system=self.system)
                     self.set_data("contour", fermisurf.as_dict(), ib=ib, EF=e)

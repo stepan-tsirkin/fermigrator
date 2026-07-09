@@ -2,6 +2,7 @@ from functools import cached_property
 import os
 import glob
 import numpy as np
+from .fermisurface import FermiSurface
 
 
 class ContourDatabase:
@@ -241,3 +242,19 @@ class ContourDatabase:
         else:
             from wannierberri import System_R
             return System_R.from_npz(os.path.join(self.path, "system"))
+
+    def set_fermi_surfaces(self,
+                           Efermi_list=None,
+                           Nfermi=101,
+                           ignore_existing=False,
+                           ):
+        energies_grid, rec_lattice = self.get_E_grid()
+        if Efermi_list is None:
+            Efermi_list = np.linspace(
+                np.min(energies_grid), np.max(energies_grid), Nfermi)
+        for ib in range(energies_grid.shape[-1]):
+            for e in Efermi_list:
+                if not self.has_contour(ib, e) or ignore_existing:
+                    fermisurf = FermiSurface.from_grid(
+                        energies_grid[..., ib], rec_lattice, e)
+                    self.set_data("contour", fermisurf.as_dict(), ib=ib, EF=e)

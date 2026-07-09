@@ -2,7 +2,7 @@ import numpy as np
 
 
 def intersections(contour1, contour2):
-    """Find intersection points between two sets of line segments.
+    """Find intersection points between two sets of line triangles.
 
     Used in QPI analysis to locate scattering vectors Q = k - k' where the
     shifted Fermi surface (contour2 translated by Q) crosses the original one.
@@ -10,7 +10,7 @@ def intersections(contour1, contour2):
     Parameters
     ----------
     contour1, contour2 : ndarray, shape (N, 2, 2)
-        Line segments as [[x1, y1], [x2, y2]] pairs.  Need not be continuous.
+        Line triangles as [[x1, y1], [x2, y2]] pairs.  Need not be continuous.
 
     Returns
     -------
@@ -20,7 +20,7 @@ def intersections(contour1, contour2):
 
     Notes
     -----
-    Collinear segments are silently skipped (denom == 0).  This is an
+    Collinear triangles are silently skipped (denom == 0).  This is an
     approximation; collinear cases can produce integrable singularities in QPI.
     """
     c1min = contour1.min(axis=1)
@@ -55,9 +55,9 @@ def intersections(contour1, contour2):
 
 
 def cut_boundary(contour, indices, axis, side):
-    """Split segments that cross the unit-cell boundary on one side.
+    """Split triangles that cross the unit-cell boundary on one side.
 
-    For segments whose end point exits the unit square on the given `side`,
+    For triangles whose end point exits the unit square on the given `side`,
     the segment is truncated at the boundary and the wrapped continuation is
     appended.  This preserves the periodic topology while keeping all
     coordinates within [0, 1].
@@ -67,7 +67,7 @@ def cut_boundary(contour, indices, axis, side):
     contour : ndarray, shape (N, 2, 2)
         Segments in reduced coordinates, modified in place for truncated ends.
     indices : ndarray (N,)
-        Original segment indices; extended to match appended segments.
+        Original segment indices; extended to match appended triangles.
     axis : int
         0 for x-boundary, 1 for y-boundary.
     side : {'lower', 'upper'}
@@ -105,7 +105,7 @@ def cut_boundary(contour, indices, axis, side):
 
 def shift_contour_mod1(contour, q):
     """Shift the contour points to be within the unit square [0, 1] x [0, 1] by applying modulo 1 to the coordinates.
-    If some segments of the contour cross the boundary of the unit square, they will be split into multiple segments that lie within the unit square.
+    If some triangles of the contour cross the boundary of the unit square, they will be split into multiple triangles that lie within the unit square.
 
     Parameters
     ----------
@@ -118,10 +118,10 @@ def shift_contour_mod1(contour, q):
     -------
     np.array (M, 2, 2)
         An array of shape (M, 2, 2) where each row represents a segment of the shifted contour in the format [[x1, y1],[ x2, y2]].
-        M >= N, as some segments may be split into multiple segments if they cross the boundary of the unit square.
+        M >= N, as some triangles may be split into multiple triangles if they cross the boundary of the unit square.
     np.array (M, dtype=int)
-        Indices if the original segments that correspond to the shifted segments.
-        Starts with 0,1,..N-1, and if a segment is split into multiple segments, the same index will be repeated for those segments.
+        Indices if the original triangles that correspond to the shifted triangles.
+        Starts with 0,1,..N-1, and if a segment is split into multiple triangles, the same index will be repeated for those triangles.
     """
     contour = np.copy(contour)
     contour = contour + q

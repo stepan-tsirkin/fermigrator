@@ -1,5 +1,6 @@
 import numpy as np
 from wannierberri.utility import cached_einsum
+from .fermisurface import FermiSurface
 
 
 def get_linewidth_Efermi(contours_db, EF):
@@ -77,8 +78,8 @@ def getDOS(contours_db, EF):
     files_contour = contours_db.get_files_Efermi("contour", EF)
     dos = 0
     for file_contour in files_contour:
-        contour = np.load(file_contour)
-        dos += np.sum(contour["weights"])
+        fsurf = FermiSurface.from_file(file_contour)
+        dos += np.sum(fsurf.weights)
     return dos
 
 
@@ -87,9 +88,9 @@ def getOhmic(contours_db, EF):
     files_contour = contours_db.get_files_Efermi("contour", EF)
     ohmic = 0
     for file_contour in files_contour:
-        contour = np.load(file_contour)
-        w = contour["weights"]
-        vn = contour["grad"]
+        fsurf = FermiSurface.from_file(file_contour)
+        w = fsurf.weights
+        vn = fsurf.gradient_cart
         ohmic += np.einsum('k,ka,kb->ab', w, vn, vn).real
     from wannierberri.factors import factor_ohmic
     system = contours_db.system

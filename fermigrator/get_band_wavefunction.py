@@ -1,8 +1,6 @@
 from collections.abc import Iterable
 from wannierberri.calculators.tabulate import Tabulator
 from wannierberri.result import KBandResult
-from wannierberri.evaluate_k import evaluate_k_path
-from wannierberri.grid import Path
 from wannierberri.utility import cached_einsum
 import numpy as np
 
@@ -71,6 +69,8 @@ class TabulatorWaveFunction(Tabulator):
 #         If ibands is int  : shape (N, num_wann)   — U_K[:, :, iband]
 #         If ibands is list : shape (N, len(ibands), num_wann)
 #     """
+#     from wannierberri.evaluate_k import evaluate_k_path
+#     from wannierberri.grid import Path
 #     assert isinstance(ibands, int) or (isinstance(ibands, Iterable) and all(isinstance(i, int) for i in ibands)), \
 #         "ibands should be an int or an iterable of ints"
 #     tabulator = TabulatorWaveFunction(ibands=ibands)
@@ -95,10 +95,9 @@ def get_wavefunction_on_kpoints(system, kpoints, ibands, batch_size=20):
     H_R = system.get_R_mat("Ham")
     result = []
     for i in range(0, len(kpoints), batch_size):
-        k = kpoints[i:i+batch_size]
+        k = kpoints[i:i + batch_size]
         phase = np.exp(1j * (k @ iRvec.T))
         Hk = cached_einsum("kR,Rij->kij", phase, H_R)
         evals, evecs = np.linalg.eigh(Hk)
         result.append(evecs[:, :, ibands])
     return np.array(np.concatenate(result, axis=0))
-

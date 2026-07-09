@@ -1,5 +1,6 @@
 import numpy as np
 from wannierberri.utility import cached_einsum
+from .fermisurface import FermiSurface
 
 
 def get_linewidth_Efermi(contours_db, EF):
@@ -42,9 +43,8 @@ def get_linewidth_Efermi(contours_db, EF):
             Vkk_conj = contours_db.get_data(
                 typ="Vkk", ib1=ib2, ib2=ib, EF=EF, none_if_missing=False)["Vkk"]
             assert np.allclose(
-                Vkk, Vkk_conj.conj().transpose(1,0,3,2)), f"Vkk file for ib1={ib}, ib2={ib2} and Efermi={EF} is not the conjugate transpose of the Vkk file for ib1={ib2}, ib2={ib} and Efermi={EF}, skipping this pair"
+                Vkk, Vkk_conj.conj().transpose(1, 0, 3, 2)), f"Vkk file for ib1={ib}, ib2={ib2} and Efermi={EF} is not the conjugate transpose of the Vkk file for ib1={ib2}, ib2={ib} and Efermi={EF}, skipping this pair"
             linewidth = cached_einsum('kqst,q,qkts->ks', Vkk, w, Vkk_conj).real
-            print(f"{Vkk.shape=}, {w.shape=}, {Vkk_conj.shape=}, linewidth shape={linewidth.shape}")
             print(
                 f"Linewidth for ib1={ib}, ib2={ib2} and Efermi={EF} has min {linewidth.min()} and max {linewidth.max()}")
             # contours_db.set_data("linewidth", dict(linewidth=linewidth, kpoints=contour1["kpoints"], weights=contour1["weights"]),
@@ -78,9 +78,24 @@ def getDOS(contours_db, EF):
     files_contour = contours_db.get_files_Efermi("contour", EF)
     dos = 0
     for file_contour in files_contour:
-        contour = np.load(file_contour)
-        dos += np.sum(contour["weights"])
+        fsurf = FermiSurface.from_file(file_contour)
+        dos += np.sum(fsurf.weights)
     return dos
+
+
+def getOhmic(contours_db, EF):
+
+    files_contour = contours_db.get_files_Efermi("contour", EF)
+    ohmic = 0
+    for file_contour in files_contour:
+        fsurf = FermiSurface.from_file(file_contour)
+        w = fsurf.weights
+        vn = fsurf.gradient_cart
+        ohmic += np.einsum('k,ka,kb->ab', w, vn, vn).real
+    from wannierberri.factors import factor_ohmic
+    system = contours_db.system
+    ohmic *= factor_ohmic / system.cell_volume
+    return ohmic
 
 
 def get_linewidth_multipole_Efermi(contours_db, EF):
@@ -118,7 +133,7 @@ def get_linewidth_multipole_Efermi(contours_db, EF):
     for ib in contours_db.get_all_bands(EF):
         multipole_eigen = contours_db.get_data(typ="multipole-eigen", ib=ib, EF=EF)
         mult_e = multipole_eigen["eigenvalues"]
-        mult_W = multipole_eigen["eigenvectors"]    
+        mult_W = multipole_eigen["eigenvectors"]
         linewidths_dict[ib] = cached_einsum(' mks, lks, l, lm-> ks',
                                             mult_W.conj(), mult_W, mult_e, vertex).real
         contours_db.set_data("linewidth-multipole", dict(linewidth=linewidths_dict[ib]), ib=ib, EF=EF)

@@ -15,7 +15,7 @@ class Rvectors2(Rvectors):
             assert shifts_center_red.ndim == 2 and shifts_center_red.shape[1] == 3, f"shifts_center_red should be a 2D array with shape (num_wann, 3), but got shape {shifts_center_red.shape}"
             self.shifts_center_red = shifts_center_red
         else:
-            self.shifts_center_red = np.zeros((1,3), dtype=float)
+            self.shifts_center_red = np.zeros((1, 3), dtype=float)
 
     @property
     def nshifts_center(self):
@@ -23,7 +23,6 @@ class Rvectors2(Rvectors):
         Return the number of center shifts.
         """
         return self.shifts_center_red.shape[0]
-
 
     @classmethod
     def from_Rvectors(cls, Rvecs):
@@ -93,7 +92,6 @@ class Rvectors2(Rvectors):
             XX_RR_grid.shape[8] == nc), f"XX_RR_grid {XX_RR_grid.shape} should have {nc} center shifts"
 
         shape_new = (self.nRvec,) * 2 + XX_RR_grid.shape[6:]
-        print(f"shape_new {shape_new}")
         XX_RR_new = np.zeros(shape_new, dtype=XX_RR_grid.dtype)
         for a in range(num_wann_r):
             ia = 0 if self.nshifts_right == 1 else a
@@ -103,7 +101,6 @@ class Rvectors2(Rvectors):
                     ic = 0 if self.nshifts_left == 1 else c
                     ishift1 = self.shift_index[ic, ia]
                     ishift2 = self.shift_index[ic, ib]
-                    # print(f"a,b,c = {a},{b},{c} : {ishift1}, {ishift2}")
                     for iRi1, iRm1, nd1 in zip(self.iRvec_index_list[ishift1],
                                                self.iRvec_mod_list[ishift1],
                                                self.Ndegen_list[ishift1]):
@@ -112,7 +109,7 @@ class Rvectors2(Rvectors):
                                                    self.Ndegen_list[ishift2]):
                             XX_RR_new[iRi1, iRi2, a, b, c] += XX_RR_grid[tuple(
                                 iRm1) + tuple(iRm2) + (a, b, c)] / (nd1 * nd2)
-        XX_R_sum_new = XX_RR_new.sum(axis=(0,1))
+        XX_R_sum_new = XX_RR_new.sum(axis=(0, 1))
         assert np.allclose(
             XX_R_sum_new, XX_RR_sum_grid), f"XX_R_sum_R_new {XX_R_sum_new} != XX_R_sum_T_tmp {XX_RR_sum_grid}"
         return XX_RR_new

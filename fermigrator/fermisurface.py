@@ -15,7 +15,8 @@ class FermiSurface:
                  triangles,
                  gradient_abs,
                  wavefunctions_center=None,
-                 iband=None
+                 iband=None,
+                 grid_size=None,
                  ):
         self.energy = energy
         self.recip_lattice = recip_lattice
@@ -24,6 +25,7 @@ class FermiSurface:
         self.gradient_abs = gradient_abs
         self.wavefunctions_center = wavefunctions_center
         self.iband = iband
+        self.grid_size = grid_size
 
     @classmethod
     def from_file(cls, filename):
@@ -40,7 +42,7 @@ class FermiSurface:
         return np.linalg.det(self.recip_lattice)
 
     def as_dict(self):
-        keys = ["energy", "recip_lattice", "triangles", "gradient_abs", "wavefunctions_center", "iband"]
+        keys = ["energy", "recip_lattice", "triangles", "gradient_abs", "wavefunctions_center", "iband", "grid_size"]
         dic = {key: getattr(self, key) for key in keys if getattr(self, key) is not None}
         return dic
 
@@ -61,7 +63,7 @@ class FermiSurface:
         return self.wavefunctions[:, :, iband]
 
     @property
-    def k_centers(self):
+    def triangles_centers(self):
         return np.mean(self.triangles, axis=1)
 
     @property
@@ -87,6 +89,10 @@ class FermiSurface:
         elif self.dim == 3:
             perp = np.cross(self.basis_vectors_cart[:, 0, :], self.basis_vectors_cart[:, 1, :])
         return perp / np.linalg.norm(perp, axis=1)[:, None]
+    
+    @property
+    def basis_vectors_3(self):
+        return np.concatenate([self.basis_vectors_cart, self.perpendicular[:, None, :]], axis=1)
 
     @property
     def gradient_cart(self):
@@ -110,6 +116,7 @@ class FermiSurface:
         energy_grid = energy_grid.copy() - fermi_level
         assert reciprocal_lattice_vectors.shape == (dim, dim), f"reciprocal_lattice_vectors must be a {dim}x{dim} array, got shape {reciprocal_lattice_vectors.shape}"
         below_EF = (energy_grid < 0)
+        grid_size = np.array(energy_grid.shape)
 
         if dim == 2:
             shifts = get_shifts_2D(reciprocal_lattice_vectors)
@@ -135,8 +142,50 @@ class FermiSurface:
             triangles=triangles,
             gradient_abs=gradient_abs,
             iband=iband,
-            wavefunctions_center=wavefunctions_center
+            wavefunctions_center=wavefunctions_center,
+            grid_size=grid_size
         )
+    
+            
+    @cached_property
+    def triangle_neighbors(self):
+        max_per_cube = 24 if self.dim == 3 else 2
+        triangles_centers_int = np.round(self.triangles_centers * self.grid_size[None, :]).astype(int) % self.grid_size[None, :]
+        triangles_in_cubes = -np.ones(tuple(self.grid_size) + (max_per_cube,), dtype=int)
+        for i, center in enumerate(triangles_centers_int):
+            cube_index = tuple(center)
+            for j in range(max_per_cube):
+                if triangles_in_cubes[cube_index][j] == -1:
+                    triangles_in_cubes[cube_index][j] = i
+                    break
+            else:
+                raise RuntimeError(f"Cube {cube_index} already has {max_per_cube} triangles, cannot add triangle {i}."
+                                    f"already has triangles {triangles_in_cubes[cube_index]}. ")
+        neighhbour_cubes = iterate_pm(self.dim)
+        print(f"Finding neighbors for {self.num_triangles} triangles in {len(neighhbour_cubes)} cubes...")
+        neighbors = []
+        for i, center in enumerate(triangles_centers_int):
+            candidates = np.concatenate([triangles_in_cubes[tuple((center + j) % self.grid_size)]
+                                        for j in neighhbour_cubes])
+            candidates = np.array(sorted(set(candidates) - {-1, i}))
+            neighbours_side = []
+            diff = self.triangles[i][None, :, None, :] - self.triangles[candidates][:, None, :, :]
+            diff = diff - np.round(diff) # (Ncand, dim, dim, dim) : (icand, vertex_i, vertex_cand, dim)
+            is_close = np.all(np.isclose(diff, 0), axis=-1) # (Ncand, dim, dim) : (icand, vertex_i, vertex_cand)
+            for side in [[0,1], [0,2], [1,2]]:
+                shared_vertices = np.sum(is_close[:, side, :], axis=(1, 2)) # (Ncand,) : (icand)
+                # shared_vertices = np.sum(np.all(np.isclose(diff[:, side, :], 0), axis=-1), axis=(1, 2))
+                neighbours_local = candidates[shared_vertices > 1]
+                # neighbours_local = [n for n in neighbours_local if n != i]
+                if len(neighbours_local) != 1:
+                    raise ValueError(f"Triangle {i} at center {center} has {len(neighbours_local)} neighbors on side {side}, expected 1. Neighbors found: {neighbours_local}")
+                neighbours_side.append(neighbours_local[0])
+            neighbors.append(neighbours_side)
+            if i % 10000 == 0:
+                print(f"Processed {i} triangles out of {self.num_triangles}...")
+        return np.array(neighbors)
+
+
 
     def plot(self, ax=None, show=True, **kwargs):
         import matplotlib.pyplot as plt
@@ -183,3 +232,18 @@ def get_wavefunction_on_kpoints(system, kpoints, ibands, batch_size=20):
         evals, evecs = np.linalg.eigh(Hk)
         result.append(evecs[:, :, ibands])
     return np.array(np.concatenate(result, axis=0))
+
+
+
+def project_to_triangle(point, triangle_origin, triangle_basis_vectors):
+    return np.linalg.solve(triangle_basis_vectors.T, (point - triangle_origin).T).T
+    
+def iterate_pm(dim):
+    if dim == 0:
+        return [[]]
+    res = []
+    for i in [-1,0,1]:
+        for j in iterate_pm(dim-1):
+            res.append([i]+j)
+    return res
+    

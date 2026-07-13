@@ -1,31 +1,45 @@
 
 
+# from numba import njit
 import numpy as np
 from propcache import cached_property
 
 from fermigrator.get_fermi_surface import get_faces, get_shifts_2D, get_shifts_3D
 from wannierberri.utility import cached_einsum
 
+# Note: There are three types of coordinates used:
+# * Cartesian "cart"
+# * Reduced "reduced" (in the basis of the reciprocal lattice vectors)
+# * local "local" (in the basis of the triangle vectors, with the third coordinate being perpendicular to the triangle plane)
+# * "abs" means the absolute value in cartesian coordinates
+# Below I need to make sure that the correct coordinates are used.
+
 
 class FermiSurface:
+
+    keys = keys = ["energy", "recip_lattice", "triangles_reduced",
+                   "gradient_abs", "wavefunctions_center", "iband",
+                   "grid_size", "triangle_neighbours"]
 
     def __init__(self,
                  energy,
                  recip_lattice,
-                 triangles,
+                 triangles_reduced,
                  gradient_abs,
                  wavefunctions_center=None,
                  iband=None,
                  grid_size=None,
+                 triangle_neighbours=None
                  ):
         self.energy = energy
         self.recip_lattice = recip_lattice
         assert self.recip_volume > 0, f"reciprocal lattice volume must be positive, got {self.recip_volume}"
-        self.triangles = triangles
+        self.triangles_reduced = triangles_reduced
         self.gradient_abs = gradient_abs
         self.wavefunctions_center = wavefunctions_center
         self.iband = iband
         self.grid_size = grid_size
+        self.triangle_neighbours = triangle_neighbours
 
     @classmethod
     def from_file(cls, filename):
@@ -42,8 +56,7 @@ class FermiSurface:
         return np.linalg.det(self.recip_lattice)
 
     def as_dict(self):
-        keys = ["energy", "recip_lattice", "triangles", "gradient_abs", "wavefunctions_center", "iband", "grid_size"]
-        dic = {key: getattr(self, key) for key in keys if getattr(self, key) is not None}
+        dic = {key: getattr(self, key) for key in self.keys if getattr(self, key) is not None}
         return dic
 
     def to_npz(self, filename):
@@ -53,18 +66,14 @@ class FermiSurface:
     def dim(self):
         return self.recip_lattice.shape[0]
 
-    @cached_property
-    def centers_red(self):
-        return np.mean(self.triangles, axis=(1))
-
     def get_wavefunction(self, iband):
         if self.wavefunctions is None:
             raise ValueError("Wavefunctions are not available for this Fermi surface.")
         return self.wavefunctions[:, :, iband]
 
-    @property
-    def triangles_centers(self):
-        return np.mean(self.triangles, axis=1)
+    @cached_property
+    def triangles_centers_reduced(self):
+        return np.mean(self.triangles_reduced, axis=1)
 
     @property
     def is_empty(self):
@@ -72,44 +81,156 @@ class FermiSurface:
 
     @property
     def num_triangles(self):
-        return len(self.triangles)
+        return len(self.triangles_reduced)
 
-    @property
+    @cached_property
     def triangles_cart(self):
-        return np.einsum('ia, kji -> kja', self.recip_lattice, self.triangles)
+        return self.triangles_reduced @ self.recip_lattice
+        # return np.einsum('ia, kji -> kja', self.recip_lattice, self.triangles_reduced)
 
-    @property
+    @cached_property
     def basis_vectors_cart(self):
         return self.triangles_cart[:, 1:, :] - self.triangles_cart[:, 0:1, :]
 
-    @property
+    @cached_property
+    def basis_vectors_reduced(self):
+        return self.triangles_reduced[:, 1:, :] - self.triangles_reduced[:, 0:1, :]
+
+    @cached_property
     def perpendicular(self):
+        """unit vector perpendicular to the triangle plane"""
         if self.dim == 2:
             perp = np.cross([0, 0, 1], self.basis_vectors_cart[:, 0, :])
         elif self.dim == 3:
             perp = np.cross(self.basis_vectors_cart[:, 0, :], self.basis_vectors_cart[:, 1, :])
         return perp / np.linalg.norm(perp, axis=1)[:, None]
-    
-    @property
-    def basis_vectors_3(self):
+
+    @cached_property
+    def basis_vectors_cart_3(self):
+        """supplement basis vectors with the unit vector perpendicular to the triangle plane"""
         return np.concatenate([self.basis_vectors_cart, self.perpendicular[:, None, :]], axis=1)
+
+    @cached_property
+    def basis_vectors_reduced_3(self):
+        """supplement basis vectors with the unit vector perpendicular to the triangle plane"""
+        return np.concatenate([self.basis_vectors_reduced, self.perpendicular[:, None, :]], axis=1)
+
+    @cached_property
+    def basis_vectors_cart_3_inv(self):
+        return np.linalg.inv(self.basis_vectors_cart_3)
+
+    @cached_property
+    def basis_vectors_reduced_3_inv(self):
+        return np.linalg.inv(self.basis_vectors_reduced_3)
+
+    def project_to_triangle(self, point_reduced, triangle_index):
+        """return the local coordinates"""
+        return (point_reduced - self.triangles_reduced[triangle_index, 0, :]) @ self.basis_vectors_reduced_3_inv[triangle_index, :, :]
+
+    def unproject_from_triangle(self, point_local, triangle_index):
+        point_local_3 = np.concatenate([point_local, [0]])
+        return self.triangles_reduced[triangle_index, 0, :] + \
+            point_local_3 @ self.basis_vectors_reduced_3[triangle_index, :, :]
+
+    def get_lorentz_force_local(self, triangle_index, B_cart):
+        """
+        find [V x B] in the basis of the triangle,
+        V = |V| * [v1 x v2] / |v1 x v2|, where v1 and v2 are the basis vectors of the triangle
+        therefore using bac-cab rule we can write
+        [V x B] = |V| * (v1 (v2 . B) - v2 (v1 . B)) / (2*area)
+
+        """
+        basis = self.basis_vectors_cart[triangle_index]
+        v_dot_B = basis @ B_cart
+        return self.gradient_abs[triangle_index] * \
+            np.array([v_dot_B[1], -v_dot_B[0]]) \
+            / (2 * self.triangle_areas[triangle_index])
+
+    def get_lorentz_force_local_all(self, B_cart):
+        """
+        find [V x B] in the basis of the triangle,
+        V = |V| * [v1 x v2] / |v1 x v2|, where v1 and v2 are the basis vectors of the triangle
+        therefore using bac-cab rule we can write
+        [V x B] = |V| * (v1 (v2 . B) - v2 (v1 . B)) / (2*area)
+
+        """
+        basis = self.basis_vectors_cart
+        v_dot_B = basis @ B_cart
+        return (self.gradient_abs / (2 * self.triangle_areas))[:, None] *\
+            np.array([v_dot_B[:, 1], -v_dot_B[:, 0]]).T
+
+    def get_trajectory_from_triangle(self, triangle_index, B_cart, time_max, kpoint_start_reduced=None):
+        if kpoint_start_reduced is None:
+            kpoint_start_reduced = self.triangles_centers_reduced[triangle_index]
+        print(f"Starting trajectory from triangle {triangle_index} \n(center={self.triangles_centers_reduced[triangle_index]}\n perpendicular={self.perpendicular[triangle_index]}\nbasis={self.basis_vectors_cart[triangle_index]}\n vertices=\n{self.triangles_reduced[triangle_index]}\n)\nat kpoint {kpoint_start_reduced} with B={B_cart} and time_max={time_max}")
+        kpoint_reduced_list = [kpoint_start_reduced.copy()]
+        time_list = [0]
+        triangle_index_list = [triangle_index]
+        kpoint_reduced = kpoint_start_reduced
+        print(f"{triangle_index_list=}, ")
+        g_shifts = {}
+        lorentz_all = self.get_lorentz_force_local_all(B_cart)
+        while time_list[-1] < time_max:
+            # k_final_reduced, dt, iside = self.trajectory_step(kpoint_reduced, triangle_index, B_cart)
+            k_final_reduced, dt, iside = trajectory_step(kpoint_reduced=kpoint_reduced,
+                                                         triangle_reduced=self.triangles_reduced[triangle_index],
+                                                         basis_vectors_reduced_3=self.basis_vectors_reduced_3[triangle_index],
+                                                         basis_vectors_reduced_3_inv=self.basis_vectors_reduced_3_inv[triangle_index],
+                                                         lorentz_force_local=lorentz_all[triangle_index])
+            triangle_index = self.get_triangle_neighbours()[triangle_index, iside]
+            g_shift = np.round(self.triangles_centers_reduced[triangle_index] - kpoint_reduced).astype(int)
+            if not np.all(g_shift == 0):
+                g_shifts[len(time_list)] = g_shift
+            time_list.append(time_list[-1] + dt)
+            triangle_index_list.append(triangle_index)
+            kpoint_reduced = k_final_reduced + g_shift
+            kpoint_reduced_list.append(kpoint_reduced)
+
+        return np.array(kpoint_reduced_list), np.array(time_list), np.array(triangle_index_list), g_shifts
+
+    # def trajectory_step(self, kpoint_reduced, triangle_index, B_cart):
+    #     eps = 1e-10
+    #     side_target =  np.array([0 , 0, 1])
+    #     side_direction = np.array([[0,-1], [-1,0], [1,1]])
+
+    #     kpoint_local = self.project_to_triangle(kpoint_reduced, triangle_index)
+    #     assert abs(kpoint_local[2]) < eps, f"kpoint {kpoint_reduced} is not on the plane of triangle {triangle_index} with center {self.triangles_centers_reduced[triangle_index]}. The perpendicular coordinate is {kpoint_local[2]}"
+    #     kpoint_local = kpoint_local[:2]
+    #     assert np.all(kpoint_local >= -eps) and np.all(kpoint_local <= 1+eps) and np.all(
+    #         kpoint_local[0]+kpoint_local[1] < 1 + eps) , \
+    #             f"kpoint {kpoint_local} is not in triangle {triangle_index}"
+    #     vel_local = self.get_lorentz_force_local(triangle_index, B_cart)
+    #     side_vel = side_direction @ vel_local
+    #     side_k0 = side_target - side_direction @ kpoint_local
+    #     dt = side_k0 / side_vel
+    #     dt[side_vel <= eps] = np.inf
+    #     iside = np.argmin(dt)
+    #     dt = dt[iside]
+    #     k_final_local = kpoint_local + vel_local * dt
+    #     k_final_reduced = self.unproject_from_triangle(k_final_local, triangle_index)
+    #     return k_final_reduced, dt, iside
 
     @property
     def gradient_cart(self):
         return self.gradient_abs[:, None] * self.perpendicular
 
     @cached_property
-    def weights(self):
+    def triangle_areas(self):
         if self.dim == 2:
             area = np.linalg.norm(self.basis_vectors_cart[:, 0, :], axis=1)
         elif self.dim == 3:
             area = np.linalg.norm(np.cross(self.basis_vectors_cart[:, 0, :],
                                            self.basis_vectors_cart[:, 1, :]), axis=1) / 2
-        return (area / self.gradient_abs) / (self.recip_volume)
+        return area
+
+    @cached_property
+    def weights(self):
+        return (self.triangle_areas / self.gradient_abs) / (self.recip_volume)
 
     @classmethod
     def from_grid(cls, energy_grid, reciprocal_lattice_vectors, fermi_level, iband=None,
-                  get_wf=False, system=None):
+                  get_wf=False, system=None,
+                  set_triangle_neighbours=False):
         if iband is not None:
             energy_grid = energy_grid[..., iband]
         dim = energy_grid.ndim
@@ -124,68 +245,68 @@ class FermiSurface:
             shifts = get_shifts_3D()
 
         res_list = [get_faces(energy_grid, shifts=sh, below_EF=below_EF, dim=dim) for sh in shifts]
-        triangles = np.concatenate([res[0] for res in res_list], axis=0)
-        gradient_red = np.concatenate([res[1] for res in res_list], axis=0)
-        gradient_cart = np.einsum('aj, kj -> ka', np.linalg.inv(reciprocal_lattice_vectors), gradient_red)
+        triangles_reduced = np.concatenate([res[0] for res in res_list], axis=0)
+        gradient_reduced = np.concatenate([res[1] for res in res_list], axis=0)
+        gradient_cart = np.einsum('aj, kj -> ka', np.linalg.inv(reciprocal_lattice_vectors), gradient_reduced)
         gradient_abs = np.linalg.norm(gradient_cart, axis=1)
+
         if get_wf:
             if system is None:
                 raise ValueError("system must be provided if get_wf is True")
-            kpoints = np.mean(triangles, axis=1)
+            kpoints = np.mean(triangles_reduced, axis=1)
             wavefunctions_center = get_wavefunction_on_kpoints(system, kpoints, iband)
         else:
             wavefunctions_center = None
 
-        return cls(
+        obj = cls(
             energy=fermi_level,
             recip_lattice=reciprocal_lattice_vectors,
-            triangles=triangles,
+            triangles_reduced=triangles_reduced,
             gradient_abs=gradient_abs,
             iband=iband,
             wavefunctions_center=wavefunctions_center,
-            grid_size=grid_size
+            grid_size=grid_size,
         )
-    
-            
-    @cached_property
-    def triangle_neighbors(self):
-        max_per_cube = 24 if self.dim == 3 else 2
-        triangles_centers_int = np.round(self.triangles_centers * self.grid_size[None, :]).astype(int) % self.grid_size[None, :]
-        triangles_in_cubes = -np.ones(tuple(self.grid_size) + (max_per_cube,), dtype=int)
-        for i, center in enumerate(triangles_centers_int):
-            cube_index = tuple(center)
-            for j in range(max_per_cube):
-                if triangles_in_cubes[cube_index][j] == -1:
-                    triangles_in_cubes[cube_index][j] = i
-                    break
-            else:
-                raise RuntimeError(f"Cube {cube_index} already has {max_per_cube} triangles, cannot add triangle {i}."
-                                    f"already has triangles {triangles_in_cubes[cube_index]}. ")
-        neighhbour_cubes = iterate_pm(self.dim)
-        print(f"Finding neighbors for {self.num_triangles} triangles in {len(neighhbour_cubes)} cubes...")
-        neighbors = []
-        for i, center in enumerate(triangles_centers_int):
-            candidates = np.concatenate([triangles_in_cubes[tuple((center + j) % self.grid_size)]
-                                        for j in neighhbour_cubes])
-            candidates = np.array(sorted(set(candidates) - {-1, i}))
-            neighbours_side = []
-            diff = self.triangles[i][None, :, None, :] - self.triangles[candidates][:, None, :, :]
-            diff = diff - np.round(diff) # (Ncand, dim, dim, dim) : (icand, vertex_i, vertex_cand, dim)
-            is_close = np.all(np.isclose(diff, 0), axis=-1) # (Ncand, dim, dim) : (icand, vertex_i, vertex_cand)
-            for side in [[0,1], [0,2], [1,2]]:
-                shared_vertices = np.sum(is_close[:, side, :], axis=(1, 2)) # (Ncand,) : (icand)
-                # shared_vertices = np.sum(np.all(np.isclose(diff[:, side, :], 0), axis=-1), axis=(1, 2))
-                neighbours_local = candidates[shared_vertices > 1]
-                # neighbours_local = [n for n in neighbours_local if n != i]
-                if len(neighbours_local) != 1:
-                    raise ValueError(f"Triangle {i} at center {center} has {len(neighbours_local)} neighbors on side {side}, expected 1. Neighbors found: {neighbours_local}")
-                neighbours_side.append(neighbours_local[0])
-            neighbors.append(neighbours_side)
-            if i % 10000 == 0:
-                print(f"Processed {i} triangles out of {self.num_triangles}...")
-        return np.array(neighbors)
+        if set_triangle_neighbours:
+            obj.get_triangle_neighbours()
+        return obj
 
-
+    def get_triangle_neighbours(self):
+        if self.triangle_neighbours is None:
+            max_per_cube = 24 if self.dim == 3 else 2
+            triangles_centers_int = np.round(self.triangles_centers_reduced * self.grid_size[None, :]).astype(int) % self.grid_size[None, :]
+            triangles_in_cubes = -np.ones(tuple(self.grid_size) + (max_per_cube,), dtype=int)
+            for i, center in enumerate(triangles_centers_int):
+                cube_index = tuple(center)
+                for j in range(max_per_cube):
+                    if triangles_in_cubes[cube_index][j] == -1:
+                        triangles_in_cubes[cube_index][j] = i
+                        break
+                else:
+                    raise RuntimeError(f"Cube {cube_index} already has {max_per_cube} triangles, cannot add triangle {i}."
+                                       f"already has triangles {triangles_in_cubes[cube_index]}. ")
+            neighhbour_cubes = iterate_pm(self.dim)
+            print(f"Finding neighbours for {self.num_triangles} triangles in {len(neighhbour_cubes)} cubes...")
+            neighbours = []
+            for i, center in enumerate(triangles_centers_int):
+                candidates = np.concatenate([triangles_in_cubes[tuple((center + j) % self.grid_size)]
+                                            for j in neighhbour_cubes])
+                candidates = np.array(sorted(set(candidates) - {-1, i}))
+                neighbours_side = []
+                diff = self.triangles_reduced[i][None, :, None, :] - self.triangles_reduced[candidates][:, None, :, :]
+                diff = diff - np.round(diff)  # (Ncand, dim, dim, dim) : (icand, vertex_i, vertex_cand, dim)
+                is_close = np.all(np.isclose(diff, 0), axis=-1)  # (Ncand, dim, dim) : (icand, vertex_i, vertex_cand)
+                for side in [[0, 1], [0, 2], [1, 2]]:
+                    shared_vertices = np.sum(is_close[:, side, :], axis=(1, 2))  # (Ncand,) : (icand)
+                    neighbours_local = candidates[shared_vertices > 1]
+                    if len(neighbours_local) != 1:
+                        raise ValueError(f"Triangle {i} at center {center} has {len(neighbours_local)} neighbours on side {side}, expected 1. Neighbours found: {neighbours_local}")
+                    neighbours_side.append(neighbours_local[0])
+                neighbours.append(neighbours_side)
+                if i % 10000 == 0:
+                    print(f"Processed {i} triangles out of {self.num_triangles}...")
+            self.triangle_neighbours = np.array(neighbours)
+        return self.triangle_neighbours
 
     def plot(self, ax=None, show=True, **kwargs):
         import matplotlib.pyplot as plt
@@ -234,16 +355,35 @@ def get_wavefunction_on_kpoints(system, kpoints, ibands, batch_size=20):
     return np.array(np.concatenate(result, axis=0))
 
 
-
-def project_to_triangle(point, triangle_origin, triangle_basis_vectors):
-    return np.linalg.solve(triangle_basis_vectors.T, (point - triangle_origin).T).T
-    
 def iterate_pm(dim):
     if dim == 0:
         return [[]]
     res = []
-    for i in [-1,0,1]:
-        for j in iterate_pm(dim-1):
-            res.append([i]+j)
+    for i in [-1, 0, 1]:
+        for j in iterate_pm(dim - 1):
+            res.append([i] + j)
     return res
-    
+
+
+# @njit
+def trajectory_step(kpoint_reduced,
+                    triangle_reduced,
+                    basis_vectors_reduced_3,
+                    basis_vectors_reduced_3_inv,
+                    lorentz_force_local):
+    eps = 1e-10
+    side_target = np.array([0, 0, 1], dtype=np.float64)
+    side_direction = np.array([[0, -1], [-1, 0], [1, 1]], dtype=np.float64)
+    kpoint_local = (kpoint_reduced - triangle_reduced[0, :]) @ basis_vectors_reduced_3_inv[:, :]
+    kpoint_local = kpoint_local[:2]
+    vel_local = lorentz_force_local
+    side_vel = np.dot(side_direction, vel_local)
+    side_k0 = side_target - np.dot(side_direction, kpoint_local)
+    dt = side_k0 / side_vel
+    dt[side_vel <= eps] = np.inf
+    iside = np.argmin(dt)
+    dt = dt[iside]
+    k_final_local = kpoint_local + vel_local * dt
+    k_final_reduced = triangle_reduced[0, :] + \
+        k_final_local @ basis_vectors_reduced_3[:2, :]
+    return k_final_reduced, dt, iside

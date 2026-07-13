@@ -1,6 +1,6 @@
 
 
-# from numba import njit
+from numba import njit
 import numpy as np
 from propcache import cached_property
 
@@ -132,21 +132,21 @@ class FermiSurface:
         return self.triangles_reduced[triangle_index, 0, :] + \
             point_local_3 @ self.basis_vectors_reduced_3[triangle_index, :, :]
 
-    def get_lorentz_force_local(self, triangle_index, B_cart):
-        """
-        find [V x B] in the basis of the triangle,
-        V = |V| * [v1 x v2] / |v1 x v2|, where v1 and v2 are the basis vectors of the triangle
-        therefore using bac-cab rule we can write
-        [V x B] = |V| * (v1 (v2 . B) - v2 (v1 . B)) / (2*area)
+    # def get_lorentz_force_local(self, triangle_index, B_cart):
+    #     """
+    #     find [V x B] in the basis of the triangle,
+    #     V = |V| * [v1 x v2] / |v1 x v2|, where v1 and v2 are the basis vectors of the triangle
+    #     therefore using bac-cab rule we can write
+    #     [V x B] = |V| * (v1 (v2 . B) - v2 (v1 . B)) / (2*area)
 
-        """
-        basis = self.basis_vectors_cart[triangle_index]
-        v_dot_B = basis @ B_cart
-        return self.gradient_abs[triangle_index] * \
-            np.array([v_dot_B[1], -v_dot_B[0]]) \
-            / (2 * self.triangle_areas[triangle_index])
+    #     """
+    #     basis = self.basis_vectors_cart[triangle_index]
+    #     v_dot_B = basis @ B_cart
+    #     return self.gradient_abs[triangle_index] * \
+    #         np.array([v_dot_B[1], -v_dot_B[0]]) \
+    #         / (2 * self.triangle_areas[triangle_index])
 
-    def get_lorentz_force_local_all(self, B_cart):
+    def set_lorentz_force_local(self, B_cart):
         """
         find [V x B] in the basis of the triangle,
         V = |V| * [v1 x v2] / |v1 x v2|, where v1 and v2 are the basis vectors of the triangle
@@ -156,37 +156,66 @@ class FermiSurface:
         """
         basis = self.basis_vectors_cart
         v_dot_B = basis @ B_cart
-        return (self.gradient_abs / (2 * self.triangle_areas))[:, None] *\
+        self.lorentz_force_local = (self.gradient_abs / (2 * self.triangle_areas))[:, None] *\
             np.array([v_dot_B[:, 1], -v_dot_B[:, 0]]).T
 
-    def get_trajectory_from_triangle(self, triangle_index, B_cart, time_max, kpoint_start_reduced=None):
+    def get_magnetoconductivity_batch(self, B_dir_cart, Btau_list, num_samples, num_batches=10):
+        conductivity = np.zeros((num_batches, len(Btau_list), self.dim, self.dim))
+        for i in range(num_batches):
+            conductivity[i] = self.get_magnetoconductivity(B_dir_cart, Btau_list, num_samples // num_batches)
+        return np.mean(conductivity, axis=0), np.std(conductivity, axis=0)
+
+    def get_magnetoconductivity(self, B_dir_cart, Btau_list, num_samples):
+        self.set_lorentz_force_local(B_dir_cart)
+        weight_sum = 0
+        conductivity = np.zeros((len(Btau_list), self.dim, self.dim))
+        time_max = max(Btau_list) * 5
+        if num_samples > self.num_triangles:
+            selected_triangles = np.arange(self.num_triangles)
+        else:
+            selected_triangles = np.random.choice(self.num_triangles, size=num_samples, replace=False)
+        for i, triangle_index in enumerate(selected_triangles):
+            weight = self.weights[triangle_index]
+            vn = self.gradient_cart[triangle_index]
+            weight_sum += weight
+            kpoints, times, triangle_indices, g_shifts = self.get_trajectory_from_triangle(triangle_index, time_max=time_max)
+            dt = times[1:] - times[:-1]
+            vt = self.gradient_cart[triangle_indices[:-1]]
+            exp_factor = np.exp(-times[None, :-1] / Btau_list[:, None])
+            vbar = np.einsum("it,tb,t->ib", exp_factor, vt, dt)
+            conductivity += weight * np.einsum("a,ib->iab", vn, vbar)
+            if i % 100 == 0:
+                print(f"Processed {i} triangles out of {len(selected_triangles)}...")
+        conductivity *= sum(self.weights) / weight_sum
+        return conductivity
+
+    def get_trajectory_from_triangle(self, triangle_index, time_max, kpoint_start_reduced=None):
         if kpoint_start_reduced is None:
             kpoint_start_reduced = self.triangles_centers_reduced[triangle_index]
-        print(f"Starting trajectory from triangle {triangle_index} \n(center={self.triangles_centers_reduced[triangle_index]}\n perpendicular={self.perpendicular[triangle_index]}\nbasis={self.basis_vectors_cart[triangle_index]}\n vertices=\n{self.triangles_reduced[triangle_index]}\n)\nat kpoint {kpoint_start_reduced} with B={B_cart} and time_max={time_max}")
         kpoint_reduced_list = [kpoint_start_reduced.copy()]
         time_list = [0]
         triangle_index_list = [triangle_index]
         kpoint_reduced = kpoint_start_reduced
-        print(f"{triangle_index_list=}, ")
-        g_shifts = {}
-        lorentz_all = self.get_lorentz_force_local_all(B_cart)
+        g_shifts = []
         while time_list[-1] < time_max:
-            # k_final_reduced, dt, iside = self.trajectory_step(kpoint_reduced, triangle_index, B_cart)
-            k_final_reduced, dt, iside = trajectory_step(kpoint_reduced=kpoint_reduced,
-                                                         triangle_reduced=self.triangles_reduced[triangle_index],
-                                                         basis_vectors_reduced_3=self.basis_vectors_reduced_3[triangle_index],
-                                                         basis_vectors_reduced_3_inv=self.basis_vectors_reduced_3_inv[triangle_index],
-                                                         lorentz_force_local=lorentz_all[triangle_index])
-            triangle_index = self.get_triangle_neighbours()[triangle_index, iside]
-            g_shift = np.round(self.triangles_centers_reduced[triangle_index] - kpoint_reduced).astype(int)
-            if not np.all(g_shift == 0):
-                g_shifts[len(time_list)] = g_shift
+            kpoint_reduced, dt, triangle_index, g_shift = self.trajectory_step(kpoint_reduced=kpoint_reduced, triangle_index=triangle_index)
+            g_shifts.append(g_shift)
             time_list.append(time_list[-1] + dt)
             triangle_index_list.append(triangle_index)
-            kpoint_reduced = k_final_reduced + g_shift
             kpoint_reduced_list.append(kpoint_reduced)
-
+        ig = np.logical_not(np.all(np.array(g_shifts) == 0, axis=1))
+        g_shifts = {i: g_shifts[i] for i in np.where(ig)[0]}
         return np.array(kpoint_reduced_list), np.array(time_list), np.array(triangle_index_list), g_shifts
+
+    def trajectory_step(self, kpoint_reduced, triangle_index):
+        k_final_reduced, dt, iside = trajectory_step(kpoint_reduced=kpoint_reduced,
+                                                     triangle_reduced=self.triangles_reduced[triangle_index],
+                                                     basis_vectors_reduced=self.basis_vectors_reduced[triangle_index],
+                                                     basis_vectors_reduced_3_inv=self.basis_vectors_reduced_3_inv[triangle_index],
+                                                     lorentz_force_local=self.lorentz_force_local[triangle_index])
+        triangle_index = self.triangle_neighbours[triangle_index, iside]
+        g_shift = np.round(self.triangles_centers_reduced[triangle_index] - kpoint_reduced)
+        return k_final_reduced + g_shift, dt, triangle_index, g_shift
 
     # def trajectory_step(self, kpoint_reduced, triangle_index, B_cart):
     #     eps = 1e-10
@@ -268,10 +297,10 @@ class FermiSurface:
             grid_size=grid_size,
         )
         if set_triangle_neighbours:
-            obj.get_triangle_neighbours()
+            obj.set_triangle_neighbours()
         return obj
 
-    def get_triangle_neighbours(self):
+    def set_triangle_neighbours(self):
         if self.triangle_neighbours is None:
             max_per_cube = 24 if self.dim == 3 else 2
             triangles_centers_int = np.round(self.triangles_centers_reduced * self.grid_size[None, :]).astype(int) % self.grid_size[None, :]
@@ -365,25 +394,28 @@ def iterate_pm(dim):
     return res
 
 
-# @njit
+@njit
 def trajectory_step(kpoint_reduced,
                     triangle_reduced,
-                    basis_vectors_reduced_3,
+                    basis_vectors_reduced,
                     basis_vectors_reduced_3_inv,
                     lorentz_force_local):
     eps = 1e-10
     side_target = np.array([0, 0, 1], dtype=np.float64)
     side_direction = np.array([[0, -1], [-1, 0], [1, 1]], dtype=np.float64)
-    kpoint_local = (kpoint_reduced - triangle_reduced[0, :]) @ basis_vectors_reduced_3_inv[:, :]
-    kpoint_local = kpoint_local[:2]
-    vel_local = lorentz_force_local
-    side_vel = np.dot(side_direction, vel_local)
+    kpoint_local = np.dot(kpoint_reduced - triangle_reduced[0, :], basis_vectors_reduced_3_inv[:, :2])
+    # kpoint_local = kpoint_local[:2]
+    # vel_local = lorentz_force_local
+    side_vel = np.dot(side_direction, lorentz_force_local)
     side_k0 = side_target - np.dot(side_direction, kpoint_local)
-    dt = side_k0 / side_vel
-    dt[side_vel <= eps] = np.inf
+    dt = np.zeros(3, dtype=np.float64)
+    for i in range(3):
+        if side_vel[i] <= eps:
+            dt[i] = np.inf
+        else:
+            dt[i] = side_k0[i] / side_vel[i]
     iside = np.argmin(dt)
     dt = dt[iside]
-    k_final_local = kpoint_local + vel_local * dt
-    k_final_reduced = triangle_reduced[0, :] + \
-        k_final_local @ basis_vectors_reduced_3[:2, :]
+    k_final_local = kpoint_local + lorentz_force_local * dt
+    k_final_reduced = triangle_reduced[0, :] + np.dot(k_final_local, basis_vectors_reduced)
     return k_final_reduced, dt, iside

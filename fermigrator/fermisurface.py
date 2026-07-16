@@ -60,6 +60,10 @@ class FermiSurface:
     def recip_volume(self):
         return np.linalg.det(self.recip_lattice)
 
+    @cached_property
+    def cell_volume(self):
+        return (2 * np.pi)**self.dim / self.recip_volume
+
     def as_dict(self):
         dic = {key: getattr(self, key) for key in self.keys if getattr(self, key) is not None}
         return dic
@@ -149,12 +153,17 @@ class FermiSurface:
         return (self.gradient_abs / (2 * self.triangle_areas))[:, None] * np.array([v_dot_B[:, 1], -v_dot_B[:, 0]]).T
 
     def get_magnetoconductivity_batch(self, B_dir_cart, Btau_list, num_samples, num_batches=10):
+        if self.num_triangles / num_samples < 3:
+            num_samples = self.num_triangles
+            num_batches = 1
         conductivity = np.zeros((num_batches, len(Btau_list), self.dim, self.dim))
         for i in range(num_batches):
             conductivity[i] = self.get_magnetoconductivity(B_dir_cart, Btau_list, num_samples // num_batches)
         return np.mean(conductivity, axis=0), np.std(conductivity, axis=0)
 
-    def get_magnetoconductivity(self, B_dir_cart, Btau_list, num_samples, exp_factor=7):
+    def get_magnetoconductivity(self, B_dir_cart, Btau_list, num_samples, exp_factor=7,
+                                spin_factor=2  # added to compare with ShengNan's paper
+                                ):
         # we want to evaluate the integral
         # vbae = \int_-\infty^0 dt e^{t/tau} u(k(t)) t/tau
         # by changing variable to t' = - t * e * B / hbar^2 * (Ang^2 * e) we get
@@ -179,7 +188,7 @@ class FermiSurface:
         weight_sum = 0
         conductivity = np.zeros((len(Btau_list), self.dim, self.dim))
         time_max = max(Btau_list_loc) * exp_factor
-        if num_samples > self.num_triangles:
+        if num_samples >= self.num_triangles:
             selected_triangles = np.arange(self.num_triangles)
         else:
             selected_triangles = np.random.choice(self.num_triangles, size=num_samples, replace=False)
@@ -206,7 +215,9 @@ class FermiSurface:
             if i % 100 == 0:
                 print(f"Processed {i} triangles out of {len(selected_triangles)}...")
         conductivity *= sum(self.weights) / weight_sum
-        return conductivity
+        from wannierberri.factors import factor_ohmic, TAU_UNIT
+        conductivity *= factor_ohmic * 1e-12 / TAU_UNIT / self.cell_volume
+        return conductivity * spin_factor
 
     @property
     def gradient_cart(self):
@@ -272,7 +283,7 @@ class FermiSurface:
     def set_triangle_neighbours(self):
         if self.triangle_neighbours is None:
             max_per_cube = 24 if self.dim == 3 else 2
-            triangles_centers_int = np.round(self.triangles_centers_reduced * self.grid_size[None, :]).astype(int) % self.grid_size[None, :]
+            triangles_centers_int = np.floor(self.triangles_centers_reduced * self.grid_size[None, :]).astype(int)  # % self.grid_size[None, :]
             triangles_in_cubes = -np.ones(tuple(self.grid_size) + (max_per_cube,), dtype=int)
             for i, center in enumerate(triangles_centers_int):
                 cube_index = tuple(center)
@@ -306,7 +317,7 @@ class FermiSurface:
             self.triangle_neighbours = np.array(neighbours)
         return self.triangle_neighbours
 
-    def plot(self, ax=None, show=True, **kwargs):
+    def plot(self, ax=None, show=True, limits=None, **kwargs):
         import matplotlib.pyplot as plt
         if ax is None:
             if self.dim == 3:
@@ -328,6 +339,11 @@ class FermiSurface:
             ax.set_xlabel("kx")
             ax.set_ylabel("ky")
             ax.set_zlabel("kz")
+        if limits is not None:
+            ax.set_xlim(limits[0])
+            ax.set_ylim(limits[1])
+            if self.dim == 3:
+                ax.set_zlim(limits[2])
         if show:
             plt.show()
 

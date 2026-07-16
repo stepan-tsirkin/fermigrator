@@ -192,28 +192,38 @@ class FermiSurface:
             selected_triangles = np.arange(self.num_triangles)
         else:
             selected_triangles = np.random.choice(self.num_triangles, size=num_samples, replace=False)
+        cyclic_count = 0
         for i, triangle_index in enumerate(selected_triangles):
             weight = self.weights[triangle_index]
             vn = self.gradient_cart[triangle_index]
             weight_sum += weight
-            kpoints, times, triangle_indices = trajectory_finder.get_trajectory(triangle_index, time_max)
+            kpoints, times, triangle_indices, cyclic = trajectory_finder.get_trajectory(triangle_index, time_max)
             times = np.array(times)
             vt = self.gradient_cart[triangle_indices]
             vbar = np.zeros((len(Btau_list), self.dim))
             # remember that trajectory is a broken line, and along the segment, the velocity is constant, so we can integrate analytically
             # vbar = sum_i=0^N-1 \int_{t_i}^{t_{i+1}} dt' / Btau_loc e^{-t'/Btau_loc} v_i =
             #      = sum_i=0^N-1 v_i * (e^{-t_i/Btau_loc} - e^{-t_{i+1}/Btau_loc}) =
-            #      = sum_i=0^N-1 v_i * e^{-t_i/Btau_loc}  - sum_i=1^N v_{i-1} * e^{-t_i/Btau_loc} =
-            #      = v_0  + sum_i=1^N-1 (v_i - v_{i-1}) * e^{-t_i/Btau_loc} - v_{N-1} * e^{-t_N/Btau_loc}
-            vbar[:] = vn[None, :]  # initialize with the value at t=0
-            exp_factor = np.exp(-times[None, 1:] / Btau_list_loc[:, None])
-            vt_diff = vt[1:-1] - vt[:-2]
-            vbar[select_Btau_nonzero] += exp_factor[:, :-1] @ vt_diff
-            vbar[select_Btau_nonzero] -= vt[-2][None, :] * exp_factor[:, -1][:, None]
+            exp_factor = np.exp(-times[None, :] / Btau_list_loc[:, None])
+            vbar[:] = vn[None, :]
+            vbar[select_Btau_nonzero] -= vn[None, :] * exp_factor[:, 1][:, None]  # initialize with the value at t=0
+            exp_factor_diff = exp_factor[:, 1:-1] - exp_factor[:, 2:]
+            v_bar_period = exp_factor_diff[:, :] @ vt[1:-1]
+            if cyclic:
+                # print(f"Trajectory is cyclic, period = {times[-1]-times[1]:.3e}, number of steps = {len(times)}")
+                period = times[-1] - times[1]
+                factor_period = np.exp(-period / Btau_list_loc)
+                factor_period = 1 / (1 - factor_period)  # sum of geometric series
+                v_bar_period[:] *= factor_period[:, None]
+                cyclic_count += 1
+            # else:
+                # print(f"Trajectory is not cyclic, time = {times[-1]:.3e}, number of steps = {len(times)}")
+            vbar[select_Btau_nonzero] += v_bar_period
 
             conductivity += weight * vn[None, :, None] * vbar[:, None, :]
             if i % 100 == 0:
                 print(f"Processed {i} triangles out of {len(selected_triangles)}...")
+        print(f"Processed {len(selected_triangles)} triangles, of which {cyclic_count} were cyclic.")
         conductivity *= sum(self.weights) / weight_sum
         from wannierberri.factors import factor_ohmic, TAU_UNIT
         conductivity *= factor_ohmic * 1e-12 / TAU_UNIT / self.cell_volume

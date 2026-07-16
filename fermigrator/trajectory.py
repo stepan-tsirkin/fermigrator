@@ -33,6 +33,8 @@ class TrajectoryFinder:
         time_list = [0]
         triangle_index_list = [triangle_index]
         kpoint_reduced = kpoint_start_reduced
+        cyclic = False
+        check_cyclic = False
         while time_list[-1] < time_max:
             kpoint_reduced, dt, triangle_index = self.trajectory_step(
                 kpoint_reduced=kpoint_reduced,
@@ -41,7 +43,14 @@ class TrajectoryFinder:
             time_list.append(time_list[-1] + dt)
             triangle_index_list.append(triangle_index)
             kpoint_reduced_list.append(kpoint_reduced)
-        return kpoint_reduced_list, time_list, triangle_index_list
+            if check_cyclic and triangle_index_list[-2] == triangle_index_list[0]:  # returned to the starting triangle
+                diff = np.linalg.norm(kpoint_reduced - kpoint_reduced_list[1])
+                if diff < 1e-8:
+                    cyclic = True
+                    break
+            check_cyclic = True
+
+        return kpoint_reduced_list, time_list, triangle_index_list, cyclic
 
     def trajectory_step(self,
                         kpoint_reduced,

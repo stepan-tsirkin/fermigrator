@@ -5,7 +5,7 @@ from propcache import cached_property
 
 from fermigrator.get_fermi_surface import get_faces, get_shifts_2D, get_shifts_3D
 from wannierberri.utility import cached_einsum
-from .trajectory import get_trajectory
+from .trajectory import TrajectoryFinder
 # Note: There are three types of coordinates used:
 # * Cartesian "cart"
 # * Reduced "reduced" (in the basis of the reciprocal lattice vectors)
@@ -91,7 +91,6 @@ class FermiSurface:
     @cached_property
     def triangles_cart(self):
         return self.triangles_reduced @ self.recip_lattice
-        # return np.einsum('ia, kji -> kja', self.recip_lattice, self.triangles_reduced)
 
     @cached_property
     def basis_vectors_cart(self):
@@ -137,21 +136,7 @@ class FermiSurface:
         return self.triangles_reduced[triangle_index, 0, :] + \
             point_local_3 @ self.basis_vectors_reduced_3[triangle_index, :, :]
 
-    # def get_lorentz_force_local(self, triangle_index, B_cart):
-    #     """
-    #     find [V x B] in the basis of the triangle,
-    #     V = |V| * [v1 x v2] / |v1 x v2|, where v1 and v2 are the basis vectors of the triangle
-    #     therefore using bac-cab rule we can write
-    #     [V x B] = |V| * (v1 (v2 . B) - v2 (v1 . B)) / (2*area)
-
-    #     """
-    #     basis = self.basis_vectors_cart[triangle_index]
-    #     v_dot_B = basis @ B_cart
-    #     return self.gradient_abs[triangle_index] * \
-    #         np.array([v_dot_B[1], -v_dot_B[0]]) \
-    #         / (2 * self.triangle_areas[triangle_index])
-
-    def set_lorentz_force_local(self, B_cart):
+    def get_lorentz_force_local(self, B_cart):
         """
         find [V x B] in the basis of the triangle,
         V = |V| * [v1 x v2] / |v1 x v2|, where v1 and v2 are the basis vectors of the triangle
@@ -161,8 +146,7 @@ class FermiSurface:
         """
         basis = self.basis_vectors_cart
         v_dot_B = basis @ B_cart
-        self.lorentz_force_local = (self.gradient_abs / (2 * self.triangle_areas))[:, None] *\
-            np.array([v_dot_B[:, 1], -v_dot_B[:, 0]]).T
+        return (self.gradient_abs / (2 * self.triangle_areas))[:, None] * np.array([v_dot_B[:, 1], -v_dot_B[:, 0]]).T
 
     def get_magnetoconductivity_batch(self, B_dir_cart, Btau_list, num_samples, num_batches=10):
         conductivity = np.zeros((num_batches, len(Btau_list), self.dim, self.dim))
@@ -170,11 +154,11 @@ class FermiSurface:
             conductivity[i] = self.get_magnetoconductivity(B_dir_cart, Btau_list, num_samples // num_batches)
         return np.mean(conductivity, axis=0), np.std(conductivity, axis=0)
 
-    def get_magnetoconductivity(self, B_dir_cart, Btau_list, num_samples, exp_factor=5):
+    def get_magnetoconductivity(self, B_dir_cart, Btau_list, num_samples, exp_factor=7):
         # we want to evaluate the integral
-        # \int_-\infty^0 dt e^{t/tau} u(k(t)) t/tau
+        # vbae = \int_-\infty^0 dt e^{t/tau} u(k(t)) t/tau
         # by changing variable to t' = - t * e * B / hbar^2 * (Ang^2 * e) we get
-        # \int_0^\infty dt'/Btau_loc e^{-t'/Btau_loc} u(k(t'))
+        # vbar = \int_0^\infty dt'/Btau_loc e^{-t'/Btau_loc} u(k(t'))
         # where Btau_loc = tau [ps]* B[T] * 1e-12 * e^2 / hbar^2 *  1e-20  = tau [ps]* B[T] * coef_Btau
         Btau_min = 1e-15
         assert np.all(Btau_list >= 0), f"Btau_list must be non-negative, got {Btau_list}"
@@ -182,7 +166,16 @@ class FermiSurface:
         Btau_list_loc = Btau_list[select_Btau_nonzero] * coef_Btau
 
         B_dir_cart = B_dir_cart / np.linalg.norm(B_dir_cart)
-        self.set_lorentz_force_local(B_dir_cart)
+        lorentz_force_local = self.get_lorentz_force_local(B_dir_cart)
+        trajectory_finder = TrajectoryFinder(
+            triangles_reduced=self.triangles_reduced,
+            basis_vectors_reduced=self.basis_vectors_reduced,
+            basis_vectors_reduced_3_inv=self.basis_vectors_reduced_3_inv,
+            lorentz_force_local=lorentz_force_local,
+            triangle_neighbours=self.triangle_neighbours,
+            triangles_centers_reduced=self.triangles_centers_reduced
+        )
+
         weight_sum = 0
         conductivity = np.zeros((len(Btau_list), self.dim, self.dim))
         time_max = max(Btau_list_loc) * exp_factor
@@ -194,48 +187,26 @@ class FermiSurface:
             weight = self.weights[triangle_index]
             vn = self.gradient_cart[triangle_index]
             weight_sum += weight
-            kpoints, times, triangle_indices = self.get_trajectory_from_triangle(triangle_index, time_max=time_max)
-            # print("Triangle indices:", triangle_indices)
-            # print("Times:", times)
-            # dt = times[1:] - times[:-1]
+            kpoints, times, triangle_indices = trajectory_finder.get_trajectory(triangle_index, time_max)
+            times = np.array(times)
             vt = self.gradient_cart[triangle_indices]
             vbar = np.zeros((len(Btau_list), self.dim))
+            # remember that trajectory is a broken line, and along the segment, the velocity is constant, so we can integrate analytically
+            # vbar = sum_i=0^N-1 \int_{t_i}^{t_{i+1}} dt' / Btau_loc e^{-t'/Btau_loc} v_i =
+            #      = sum_i=0^N-1 v_i * (e^{-t_i/Btau_loc} - e^{-t_{i+1}/Btau_loc}) =
+            #      = sum_i=0^N-1 v_i * e^{-t_i/Btau_loc}  - sum_i=1^N v_{i-1} * e^{-t_i/Btau_loc} =
+            #      = v_0  + sum_i=1^N-1 (v_i - v_{i-1}) * e^{-t_i/Btau_loc} - v_{N-1} * e^{-t_N/Btau_loc}
             vbar[:] = vn[None, :]  # initialize with the value at t=0
-            vt_diff = vt[1:] - vt[:-1]
             exp_factor = np.exp(-times[None, 1:] / Btau_list_loc[:, None])
-            vbar[select_Btau_nonzero] += np.einsum("it,tb->ib", exp_factor, vt_diff)
-            conductivity += weight * np.einsum("a,ib->iab", vn, vbar)
+            vt_diff = vt[1:-1] - vt[:-2]
+            vbar[select_Btau_nonzero] += exp_factor[:, :-1] @ vt_diff
+            vbar[select_Btau_nonzero] -= vt[-2][None, :] * exp_factor[:, -1][:, None]
+
+            conductivity += weight * vn[None, :, None] * vbar[:, None, :]
             if i % 100 == 0:
                 print(f"Processed {i} triangles out of {len(selected_triangles)}...")
         conductivity *= sum(self.weights) / weight_sum
         return conductivity
-
-    def get_trajectory_from_triangle(self, triangle_index, time_max, kpoint_start_reduced=None):
-        r"""
-        we solve the equation, which in SI units reads
-        dk/dt = -e*B/hbar^2 * [U x \hat{B}]
-        where U is tha band gradient, and B is the magnetic field and \hat{B} is the unit vector in the direction of B.
-
-        However, we want to revert the time (propagate backwards), and we want that the coefficient in front of the cross product to be 1,
-        when using the internal units (eV and Angstroms). Therefore we define the dimensionless time
-        t' = - t * e * B / hbar^2 * (Ang^2 * e)
-        where Ang = 1e-10m and e = 1.602e-19 J/eV appear from units conversion. Then the equation becomes
-        dk/dt' = [U x \hat{B}]
-        """
-        if kpoint_start_reduced is None:
-            kpoint_start_reduced = self.triangles_centers_reduced[triangle_index]
-            kpoint_reduced_list, time_list, triangle_index_list = \
-                get_trajectory(triangle_index=triangle_index,
-                               time_max=time_max,
-                               kpoint_start_reduced=kpoint_start_reduced,
-                               triangles_reduced=self.triangles_reduced,
-                               basis_vectors_reduced=self.basis_vectors_reduced,
-                               basis_vectors_reduced_3_inv=self.basis_vectors_reduced_3_inv,
-                               lorentz_force_local=self.lorentz_force_local,
-                               triangle_neighbours=self.triangle_neighbours,
-                               triangles_centers_reduced=self.triangles_centers_reduced
-                               )
-            return np.array(kpoint_reduced_list), np.array(time_list), np.array(triangle_index_list)
 
     @property
     def gradient_cart(self):

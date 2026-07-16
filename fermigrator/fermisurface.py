@@ -1,18 +1,23 @@
 
 
-from numba import njit
 import numpy as np
 from propcache import cached_property
 
 from fermigrator.get_fermi_surface import get_faces, get_shifts_2D, get_shifts_3D
 from wannierberri.utility import cached_einsum
-
+from .trajectory import get_trajectory
 # Note: There are three types of coordinates used:
 # * Cartesian "cart"
 # * Reduced "reduced" (in the basis of the reciprocal lattice vectors)
 # * local "local" (in the basis of the triangle vectors, with the third coordinate being perpendicular to the triangle plane)
 # * "abs" means the absolute value in cartesian coordinates
 # Below I need to make sure that the correct coordinates are used.
+
+from scipy.constants import physical_constants
+elementary_charge = physical_constants["elementary charge"][0]
+hbar = physical_constants["Planck constant over 2 pi"][0]
+coef_Btau = elementary_charge**2 / hbar**2 * 1e-12 * 1e-20  # [ps]*[T] * e^2 / hbar^2 * Ang^2
+print(f"coef_Btau = {coef_Btau:.3e}")
 
 
 class FermiSurface:
@@ -165,11 +170,22 @@ class FermiSurface:
             conductivity[i] = self.get_magnetoconductivity(B_dir_cart, Btau_list, num_samples // num_batches)
         return np.mean(conductivity, axis=0), np.std(conductivity, axis=0)
 
-    def get_magnetoconductivity(self, B_dir_cart, Btau_list, num_samples):
+    def get_magnetoconductivity(self, B_dir_cart, Btau_list, num_samples, exp_factor=5):
+        # we want to evaluate the integral
+        # \int_-\infty^0 dt e^{t/tau} u(k(t)) t/tau
+        # by changing variable to t' = - t * e * B / hbar^2 * (Ang^2 * e) we get
+        # \int_0^\infty dt'/Btau_loc e^{-t'/Btau_loc} u(k(t'))
+        # where Btau_loc = tau [ps]* B[T] * 1e-12 * e^2 / hbar^2 *  1e-20  = tau [ps]* B[T] * coef_Btau
+        Btau_min = 1e-15
+        assert np.all(Btau_list >= 0), f"Btau_list must be non-negative, got {Btau_list}"
+        select_Btau_nonzero = Btau_list > Btau_min
+        Btau_list_loc = Btau_list[select_Btau_nonzero] * coef_Btau
+
+        B_dir_cart = B_dir_cart / np.linalg.norm(B_dir_cart)
         self.set_lorentz_force_local(B_dir_cart)
         weight_sum = 0
         conductivity = np.zeros((len(Btau_list), self.dim, self.dim))
-        time_max = max(Btau_list) * 5
+        time_max = max(Btau_list_loc) * exp_factor
         if num_samples > self.num_triangles:
             selected_triangles = np.arange(self.num_triangles)
         else:
@@ -178,11 +194,16 @@ class FermiSurface:
             weight = self.weights[triangle_index]
             vn = self.gradient_cart[triangle_index]
             weight_sum += weight
-            kpoints, times, triangle_indices, g_shifts = self.get_trajectory_from_triangle(triangle_index, time_max=time_max)
-            dt = times[1:] - times[:-1]
-            vt = self.gradient_cart[triangle_indices[:-1]]
-            exp_factor = np.exp(-times[None, :-1] / Btau_list[:, None])
-            vbar = np.einsum("it,tb,t->ib", exp_factor, vt, dt)
+            kpoints, times, triangle_indices = self.get_trajectory_from_triangle(triangle_index, time_max=time_max)
+            # print("Triangle indices:", triangle_indices)
+            # print("Times:", times)
+            # dt = times[1:] - times[:-1]
+            vt = self.gradient_cart[triangle_indices]
+            vbar = np.zeros((len(Btau_list), self.dim))
+            vbar[:] = vn[None, :]  # initialize with the value at t=0
+            vt_diff = vt[1:] - vt[:-1]
+            exp_factor = np.exp(-times[None, 1:] / Btau_list_loc[:, None])
+            vbar[select_Btau_nonzero] += np.einsum("it,tb->ib", exp_factor, vt_diff)
             conductivity += weight * np.einsum("a,ib->iab", vn, vbar)
             if i % 100 == 0:
                 print(f"Processed {i} triangles out of {len(selected_triangles)}...")
@@ -190,54 +211,31 @@ class FermiSurface:
         return conductivity
 
     def get_trajectory_from_triangle(self, triangle_index, time_max, kpoint_start_reduced=None):
+        r"""
+        we solve the equation, which in SI units reads
+        dk/dt = -e*B/hbar^2 * [U x \hat{B}]
+        where U is tha band gradient, and B is the magnetic field and \hat{B} is the unit vector in the direction of B.
+
+        However, we want to revert the time (propagate backwards), and we want that the coefficient in front of the cross product to be 1,
+        when using the internal units (eV and Angstroms). Therefore we define the dimensionless time
+        t' = - t * e * B / hbar^2 * (Ang^2 * e)
+        where Ang = 1e-10m and e = 1.602e-19 J/eV appear from units conversion. Then the equation becomes
+        dk/dt' = [U x \hat{B}]
+        """
         if kpoint_start_reduced is None:
             kpoint_start_reduced = self.triangles_centers_reduced[triangle_index]
-        kpoint_reduced_list = [kpoint_start_reduced.copy()]
-        time_list = [0]
-        triangle_index_list = [triangle_index]
-        kpoint_reduced = kpoint_start_reduced
-        g_shifts = []
-        while time_list[-1] < time_max:
-            kpoint_reduced, dt, triangle_index, g_shift = self.trajectory_step(kpoint_reduced=kpoint_reduced, triangle_index=triangle_index)
-            g_shifts.append(g_shift)
-            time_list.append(time_list[-1] + dt)
-            triangle_index_list.append(triangle_index)
-            kpoint_reduced_list.append(kpoint_reduced)
-        ig = np.logical_not(np.all(np.array(g_shifts) == 0, axis=1))
-        g_shifts = {i: g_shifts[i] for i in np.where(ig)[0]}
-        return np.array(kpoint_reduced_list), np.array(time_list), np.array(triangle_index_list), g_shifts
-
-    def trajectory_step(self, kpoint_reduced, triangle_index):
-        k_final_reduced, dt, iside = trajectory_step(kpoint_reduced=kpoint_reduced,
-                                                     triangle_reduced=self.triangles_reduced[triangle_index],
-                                                     basis_vectors_reduced=self.basis_vectors_reduced[triangle_index],
-                                                     basis_vectors_reduced_3_inv=self.basis_vectors_reduced_3_inv[triangle_index],
-                                                     lorentz_force_local=self.lorentz_force_local[triangle_index])
-        triangle_index = self.triangle_neighbours[triangle_index, iside]
-        g_shift = np.round(self.triangles_centers_reduced[triangle_index] - kpoint_reduced)
-        return k_final_reduced + g_shift, dt, triangle_index, g_shift
-
-    # def trajectory_step(self, kpoint_reduced, triangle_index, B_cart):
-    #     eps = 1e-10
-    #     side_target =  np.array([0 , 0, 1])
-    #     side_direction = np.array([[0,-1], [-1,0], [1,1]])
-
-    #     kpoint_local = self.project_to_triangle(kpoint_reduced, triangle_index)
-    #     assert abs(kpoint_local[2]) < eps, f"kpoint {kpoint_reduced} is not on the plane of triangle {triangle_index} with center {self.triangles_centers_reduced[triangle_index]}. The perpendicular coordinate is {kpoint_local[2]}"
-    #     kpoint_local = kpoint_local[:2]
-    #     assert np.all(kpoint_local >= -eps) and np.all(kpoint_local <= 1+eps) and np.all(
-    #         kpoint_local[0]+kpoint_local[1] < 1 + eps) , \
-    #             f"kpoint {kpoint_local} is not in triangle {triangle_index}"
-    #     vel_local = self.get_lorentz_force_local(triangle_index, B_cart)
-    #     side_vel = side_direction @ vel_local
-    #     side_k0 = side_target - side_direction @ kpoint_local
-    #     dt = side_k0 / side_vel
-    #     dt[side_vel <= eps] = np.inf
-    #     iside = np.argmin(dt)
-    #     dt = dt[iside]
-    #     k_final_local = kpoint_local + vel_local * dt
-    #     k_final_reduced = self.unproject_from_triangle(k_final_local, triangle_index)
-    #     return k_final_reduced, dt, iside
+            kpoint_reduced_list, time_list, triangle_index_list = \
+                get_trajectory(triangle_index=triangle_index,
+                               time_max=time_max,
+                               kpoint_start_reduced=kpoint_start_reduced,
+                               triangles_reduced=self.triangles_reduced,
+                               basis_vectors_reduced=self.basis_vectors_reduced,
+                               basis_vectors_reduced_3_inv=self.basis_vectors_reduced_3_inv,
+                               lorentz_force_local=self.lorentz_force_local,
+                               triangle_neighbours=self.triangle_neighbours,
+                               triangles_centers_reduced=self.triangles_centers_reduced
+                               )
+            return np.array(kpoint_reduced_list), np.array(time_list), np.array(triangle_index_list)
 
     @property
     def gradient_cart(self):
@@ -392,30 +390,3 @@ def iterate_pm(dim):
         for j in iterate_pm(dim - 1):
             res.append([i] + j)
     return res
-
-
-@njit
-def trajectory_step(kpoint_reduced,
-                    triangle_reduced,
-                    basis_vectors_reduced,
-                    basis_vectors_reduced_3_inv,
-                    lorentz_force_local):
-    eps = 1e-10
-    side_target = np.array([0, 0, 1], dtype=np.float64)
-    side_direction = np.array([[0, -1], [-1, 0], [1, 1]], dtype=np.float64)
-    kpoint_local = np.dot(kpoint_reduced - triangle_reduced[0, :], basis_vectors_reduced_3_inv[:, :2])
-    # kpoint_local = kpoint_local[:2]
-    # vel_local = lorentz_force_local
-    side_vel = np.dot(side_direction, lorentz_force_local)
-    side_k0 = side_target - np.dot(side_direction, kpoint_local)
-    dt = np.zeros(3, dtype=np.float64)
-    for i in range(3):
-        if side_vel[i] <= eps:
-            dt[i] = np.inf
-        else:
-            dt[i] = side_k0[i] / side_vel[i]
-    iside = np.argmin(dt)
-    dt = dt[iside]
-    k_final_local = kpoint_local + lorentz_force_local * dt
-    k_final_reduced = triangle_reduced[0, :] + np.dot(k_final_local, basis_vectors_reduced)
-    return k_final_reduced, dt, iside

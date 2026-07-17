@@ -4,7 +4,7 @@ import numpy as np
 from propcache import cached_property
 
 from fermigrator.get_fermi_surface import get_faces, get_shifts_2D, get_shifts_3D
-from wannierberri.utility import cached_einsum
+from .utility import cached_einsum, clear_cached
 from .trajectory import TrajectoryFinder
 # Note: There are three types of coordinates used:
 # * Cartesian "cart"
@@ -22,9 +22,9 @@ print(f"coef_Btau = {coef_Btau:.3e}")
 
 class FermiSurface:
 
-    keys = keys = ["energy", "recip_lattice", "triangles_reduced",
-                   "gradient_abs", "wavefunctions_center", "iband",
-                   "grid_size", "triangle_neighbours"]
+    keys = ["energy", "recip_lattice", "triangles_reduced",
+            "gradient_abs", "wavefunctions_center", "iband",
+            "grid_size", "triangle_neighbours", "is_connected"]
 
     def __init__(self,
                  energy,
@@ -34,7 +34,8 @@ class FermiSurface:
                  wavefunctions_center=None,
                  iband=None,
                  grid_size=None,
-                 triangle_neighbours=None
+                 triangle_neighbours=None,
+                 is_connected=False
                  ):
         self.energy = energy
         self.recip_lattice = recip_lattice
@@ -45,6 +46,7 @@ class FermiSurface:
         self.iband = iband
         self.grid_size = grid_size
         self.triangle_neighbours = triangle_neighbours
+        self.is_connected = is_connected
 
     @classmethod
     def from_file(cls, filename):
@@ -221,7 +223,7 @@ class FermiSurface:
             vbar[select_Btau_nonzero] += v_bar_period
 
             conductivity += weight * vn[None, :, None] * vbar[:, None, :]
-            if i % 100 == 0:
+            if i % 1000 == 0:
                 print(f"Processed {i} triangles out of {len(selected_triangles)}...")
         print(f"Processed {len(selected_triangles)} triangles, of which {cyclic_count} were cyclic.")
         conductivity *= sum(self.weights) / weight_sum
@@ -247,26 +249,26 @@ class FermiSurface:
         return (self.triangle_areas / self.gradient_abs) / (self.recip_volume)
 
     @classmethod
-    def from_grid(cls, energy_grid, reciprocal_lattice_vectors, fermi_level, iband=None,
+    def from_grid(cls, energy_grid, reciprocal_lattice, fermi_level, iband=None,
                   get_wf=False, system=None,
                   set_triangle_neighbours=False):
         if iband is not None:
             energy_grid = energy_grid[..., iband]
         dim = energy_grid.ndim
         energy_grid = energy_grid.copy() - fermi_level
-        assert reciprocal_lattice_vectors.shape == (dim, dim), f"reciprocal_lattice_vectors must be a {dim}x{dim} array, got shape {reciprocal_lattice_vectors.shape}"
+        assert reciprocal_lattice.shape == (dim, dim), f"reciprocal_lattice_vectors must be a {dim}x{dim} array, got shape {reciprocal_lattice.shape}"
         below_EF = (energy_grid < 0)
         grid_size = np.array(energy_grid.shape)
 
         if dim == 2:
-            shifts = get_shifts_2D(reciprocal_lattice_vectors)
+            shifts = get_shifts_2D(reciprocal_lattice)
         elif dim == 3:
             shifts = get_shifts_3D()
 
         res_list = [get_faces(energy_grid, shifts=sh, below_EF=below_EF, dim=dim) for sh in shifts]
         triangles_reduced = np.concatenate([res[0] for res in res_list], axis=0)
         gradient_reduced = np.concatenate([res[1] for res in res_list], axis=0)
-        gradient_cart = np.einsum('aj, kj -> ka', np.linalg.inv(reciprocal_lattice_vectors), gradient_reduced)
+        gradient_cart = np.einsum('aj, kj -> ka', np.linalg.inv(reciprocal_lattice), gradient_reduced)
         gradient_abs = np.linalg.norm(gradient_cart, axis=1)
 
         if get_wf:
@@ -279,7 +281,7 @@ class FermiSurface:
 
         obj = cls(
             energy=fermi_level,
-            recip_lattice=reciprocal_lattice_vectors,
+            recip_lattice=reciprocal_lattice,
             triangles_reduced=triangles_reduced,
             gradient_abs=gradient_abs,
             iband=iband,
@@ -361,6 +363,65 @@ class FermiSurface:
         if self.wavefunctions_center is None:
             self.wavefunctions_center = get_wavefunction_on_kpoints(system, self.kpoints, self.iband)
         return self.wavefunctions_center
+
+    def select_pocket_ids(self, triangle_start=0):
+        """Select a pocket of the Fermi surface starting from triangle ik_start"""
+        selected = set([triangle_start])
+        previous_group = [triangle_start]
+        while len(previous_group) > 0:
+            new_group = set.union(*[set(neighbours) for neighbours in self.triangle_neighbours[previous_group]]) - selected
+            selected.update(new_group)
+            previous_group = list(new_group)
+        return list(sorted(selected))
+
+    def to_pockets(self):
+        """Split the Fermi surface into pockets"""
+        pockets = []
+        while not self.is_empty:
+            pocket_ids = self.select_pocket_ids(triangle_start=0)
+            pocket_id_inv = {id: i for i, id in enumerate(pocket_ids)}
+            neighbours = np.array([[pocket_id_inv[i] for i in neighbours] for neighbours in self.triangle_neighbours[pocket_ids]])
+            pocket = FermiSurface(
+                energy=self.energy,
+                recip_lattice=self.recip_lattice,
+                triangles_reduced=self.triangles_reduced[pocket_ids],
+                gradient_abs=self.gradient_abs[pocket_ids],
+                wavefunctions_center=self.wavefunctions_center[pocket_ids] if self.wavefunctions_center is not None else None,
+                iband=self.iband,
+                grid_size=self.grid_size,
+                triangle_neighbours=neighbours
+            )
+            pockets.append(pocket)
+            print(f"Found pocket with {len(pocket_ids)} triangles, {self.num_triangles} triangles remaining.")
+            # remove the pocket from the Fermi surface
+            unselected = [i for i in range(self.num_triangles) if i not in pocket_ids]
+            unselected_inv = {id: i for i, id in enumerate(unselected)}
+
+            self.triangles_reduced = self.triangles_reduced[unselected]
+            self.gradient_abs = self.gradient_abs[unselected]
+            if self.wavefunctions_center is not None:
+                self.wavefunctions_center = self.wavefunctions_center[unselected]
+            if self.triangle_neighbours is not None:
+                self.triangle_neighbours = np.array([[unselected_inv[i] for i in neighbours] for neighbours in self.triangle_neighbours[unselected]])
+            clear_cached(self, ["triangles_centers_reduced", "basis_vectors_cart", "basis_vectors_reduced",
+                                "perpendicular", "basis_vectors_cart_3", "basis_vectors_reduced_3",
+                                "basis_vectors_cart_3_inv", "basis_vectors_reduced_3_inv", "triangle_areas", "weights", "gradient_cart"])
+        return pockets
+
+    def connect(self):
+        """to be applied to a connected pocket"""
+        checked = set([0])
+        previous_group = [0]
+        while len(previous_group) > 0:
+            new_group = set()
+            for triangle in previous_group:
+                for neighbour in self.triangle_neighbours[triangle]:
+                    if neighbour not in checked:
+                        shift = np.mean(self.triangles_reduced[neighbour] - self.triangles_reduced[triangle], axis=0)
+                        self.triangles_reduced[neighbour] -= np.round(shift)
+                        new_group.add(neighbour)
+            previous_group = list(new_group)
+            checked.update(new_group)
 
 
 def get_wavefunction_on_kpoints(system, kpoints, ibands, batch_size=20):

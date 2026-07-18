@@ -1,5 +1,7 @@
 
 
+import warnings
+
 import numpy as np
 from propcache import cached_property
 
@@ -25,6 +27,7 @@ class FermiSurface:
     keys = ["energy", "recip_lattice", "triangles_reduced",
             "gradient_abs", "wavefunctions_center", "iband",
             "grid_size", "triangle_neighbours", "is_connected"]
+    triangle_side_order = [[0, 1], [0, 2], [1, 2]]  # the order of the triangle sides, used to find neighbours
 
     def __init__(self,
                  energy,
@@ -49,7 +52,7 @@ class FermiSurface:
         self.is_connected = is_connected
 
     @classmethod
-    def from_file(cls, filename):
+    def from_npz(cls, filename):
         data = dict(np.load(filename))
         import os
         for part in os.path.basename(filename).strip(".npz").split("_"):
@@ -317,7 +320,7 @@ class FermiSurface:
                 diff = self.triangles_reduced[i][None, :, None, :] - self.triangles_reduced[candidates][:, None, :, :]
                 diff = diff - np.round(diff)  # (Ncand, dim, dim, dim) : (icand, vertex_i, vertex_cand, dim)
                 is_close = np.all(np.isclose(diff, 0), axis=-1)  # (Ncand, dim, dim) : (icand, vertex_i, vertex_cand)
-                for side in [[0, 1], [0, 2], [1, 2]]:
+                for side in self.triangle_side_order:
                     shared_vertices = np.sum(is_close[:, side, :], axis=(1, 2))  # (Ncand,) : (icand)
                     neighbours_local = candidates[shared_vertices > 1]
                     if len(neighbours_local) != 1:
@@ -392,11 +395,12 @@ class FermiSurface:
                 triangle_neighbours=neighbours
             )
             pockets.append(pocket)
-            print(f"Found pocket with {len(pocket_ids)} triangles, {self.num_triangles} triangles remaining.")
-            # remove the pocket from the Fermi surface
-            unselected = [i for i in range(self.num_triangles) if i not in pocket_ids]
-            unselected_inv = {id: i for i, id in enumerate(unselected)}
 
+            # remove the pocket from the Fermi surface
+            unselected_bool = np.ones(self.num_triangles, dtype=bool)
+            unselected_bool[pocket_ids] = False
+            unselected = np.where(unselected_bool)[0]
+            unselected_inv = {id: i for i, id in enumerate(unselected)}
             self.triangles_reduced = self.triangles_reduced[unselected]
             self.gradient_abs = self.gradient_abs[unselected]
             if self.wavefunctions_center is not None:
@@ -406,6 +410,7 @@ class FermiSurface:
             clear_cached(self, ["triangles_centers_reduced", "basis_vectors_cart", "basis_vectors_reduced",
                                 "perpendicular", "basis_vectors_cart_3", "basis_vectors_reduced_3",
                                 "basis_vectors_cart_3_inv", "basis_vectors_reduced_3_inv", "triangle_areas", "weights", "gradient_cart"])
+            print(f"Found pocket with {len(pocket_ids)} triangles, {self.num_triangles} triangles remaining.")
         return pockets
 
     def connect(self):
@@ -422,6 +427,204 @@ class FermiSurface:
                         new_group.add(neighbour)
             previous_group = list(new_group)
             checked.update(new_group)
+
+
+    def get_slices(self, axis_cart=[0, 0, 1], dk=0.1, k_list=None):
+        """get slices of the Fermi surface along a given axis"""
+        slices_dict = {}
+        axis_cart = np.array(axis_cart)
+        axis_cart = axis_cart / np.linalg.norm(axis_cart)
+        triangles_corners_proj = self.triangles_cart @ axis_cart
+        if k_list is None:
+            kz_min = np.min(triangles_corners_proj)
+            kz_max = np.max(triangles_corners_proj)
+            nk = int(np.ceil((kz_max - kz_min) / dk))
+            dk = (kz_max - kz_min) / nk
+            kz = np.linspace(kz_min + dk/2, kz_max-dk/2, nk, endpoint=True)
+        else:
+            kz = np.array(k_list)
+        for k in kz:
+            slices = self.get_segments_kz(k, triangles_corners_proj)
+            lines = self.get_all_connected_lines(*slices)
+            if len(lines)>0:
+                slices_dict[k] = lines
+        dk = kz[1] - kz[0] if len(kz)>1 else None
+        return slices_dict, dk
+            
+
+
+    def get_segments_kz(self, kz, triangles_corners_proj):
+        """
+        get the segments of crossing k=kz plane with the triangles of the Fermi surface. 
+
+        Parameters
+        ----------
+        kz : float
+            The value of k along the axis_cart direction.
+        triangles_corners_proj : np.ndarray
+            The projected coordinates of the triangle corners along the axis_cart direction.
+
+        Returns
+        -------
+        triangle_ids : np.ndarray((N,), dtype=int)
+            The indices of the triangles that cross the k=kz plane.
+        sides : np.ndarray((N, 2), dtype=int)
+            The indices of the sides of the triangles that cross the k=kz plane. (0, 1, 2) corresponds to the sides of the triangle.
+        segments : np.ndarray((N, 2, 3), dtype=float)
+            The coordinates of the segments that cross the k=kz plane. Each segment is defined by two points in 3D space. (reduced coordinates)
+        """
+        above = triangles_corners_proj > kz
+        below = triangles_corners_proj < kz
+        above_any = np.any(above, axis=1)  # should it be >= ?
+        below_any = np.any(below, axis=1)  # should it be <= ?
+        triangle_ids = np.where(above_any & below_any)[0]
+        N = len(triangle_ids)
+        segments_reduced = np.zeros((N, 2, 3))
+        sides = np.zeros((N, 2), dtype=int)
+        for i, id in enumerate(triangle_ids):
+            proj = triangles_corners_proj[id]
+            above_loc = above[id]
+            below_loc = below[id]
+            segments_loc = []
+            sides_loc = []
+            for iside, side in enumerate(self.triangle_side_order):
+                if (above_loc[side[0]] and below_loc[side[1]]) or (above_loc[side[1]] and below_loc[side[0]]):
+                    sides_loc.append(iside)
+                    a = (proj[side[0]] - kz) / (proj[side[0]] - proj[side[1]])
+                    point = self.triangles_reduced[id, side[0], :] * (1 - a) + self.triangles_reduced[id, side[1], :] * a
+                    segments_loc.append(point)
+                if len(segments_loc) == 2:
+                    break
+            if len(segments_loc) != 2:
+                raise ValueError(f"Triangle {id} does not have 2 intersection points with the plane k={kz}. Found {len(segments_loc)} points.")
+            segments_reduced[i, :, :] = segments_loc
+            sides[i, :] = sides_loc
+        return triangle_ids, sides, segments_reduced
+
+
+    def get_all_connected_lines(self, triangles_ids, sides, segments, tol=1e-6):
+        lines = []
+        while len(triangles_ids) > 0:
+            line, (triangles_ids, sides, segments) = self.get_connected_line(triangles_ids, sides, segments, tol=tol)
+            lines.append(line)
+        return lines                
+    
+    def get_connected_line(self, triangles_ids, sides, segments, tol=1e-6, plane_normal_cart=np.zeros(3)):
+        triangles_ids_inv = {id: i for i, id in enumerate(triangles_ids)}
+        used = np.zeros(len(triangles_ids), dtype=bool)
+        line = [segments[0, 0, :], segments[0, 1, :]]
+        line_triangle_ids = [triangles_ids[0]]
+        used[0] = True
+        # go forward
+        def propagate(direction):
+            """direction = 1 for forward, 0 for backward"""
+            while True and  not np.all(used):
+                last_point = line[-direction]
+                last_triangle_id = line_triangle_ids[-direction]
+                last_sides = sides[triangles_ids_inv[last_triangle_id]]
+                next_triangle_id = self.triangle_neighbours[last_triangle_id, last_sides[direction]]
+                if next_triangle_id not in triangles_ids:
+                    break
+                else:
+                    next_triangle_id_loc = triangles_ids_inv[next_triangle_id]
+                    if used[next_triangle_id_loc]:
+                        break
+                    else:   
+                        next_segment = segments[next_triangle_id_loc]
+                        diff = next_segment-last_point[None, :]
+                        g = np.round(np.mean(diff, axis=0))
+                        if np.dot(plane_normal_cart, g @ self.recip_lattice)>tol:
+                            break
+                        diff -=g[None,:]
+
+                        dist_next_point = np.linalg.norm(diff, axis=1)
+
+                        if dist_next_point[1-direction] < tol:
+                            pass
+                        elif dist_next_point[direction] < tol:
+                            segments[next_triangle_id_loc, :, :] = segments[next_triangle_id_loc, [1, 0], :]
+                            sides[next_triangle_id_loc, :] = sides[next_triangle_id_loc, [1, 0]]
+                        else:
+                            break
+                        next_point = segments[next_triangle_id_loc, direction, :] - g
+                        if direction == 1:
+                            line.append(next_point)
+                            line_triangle_ids.append(next_triangle_id)
+                        else:
+                            line.insert(0, next_point)
+                            line_triangle_ids.insert(0, next_triangle_id)
+                        used[next_triangle_id_loc] = True
+        propagate(direction=1)
+        propagate(direction=0)
+        unused = np.where(~used)[0]
+        return (np.array(line), np.array(line_triangle_ids) ), (triangles_ids[unused], sides[unused], segments[unused])
+
+
+    def _get_connected_line(self, triangles_ids, sides, segments, tol=1e-6):
+        triangles_ids_inv = {id: i for i, id in enumerate(triangles_ids)}
+        used = np.zeros(len(triangles_ids), dtype=bool)
+        line = [segments[0, 0, :], segments[0, 1, :]]
+        line_triangle_ids = [triangles_ids[0]]
+        used[0] = True
+        # go forward
+        while True and  not np.all(used):
+            print (f"line length = {len(line)}, triangles left = {len(triangles_ids) - np.sum(used)}")
+            last_point = line[-1]
+            last_triangle_id = line_triangle_ids[-1]
+            last_sides = sides[triangles_ids_inv[last_triangle_id]]
+            next_triangle_id = self.triangle_neighbours[last_triangle_id, last_sides[1]]
+            if next_triangle_id not in triangles_ids:
+                break
+            else:
+                next_triangle_id_loc = triangles_ids_inv[next_triangle_id]
+                if used[next_triangle_id_loc]:
+                    break
+                else:
+                    dist_next_point = np.linalg.norm(segments[next_triangle_id_loc, :, :]-last_point[None, :], axis=1)
+                    if dist_next_point[0] < tol:
+                        pass
+                    elif dist_next_point[1] < tol:
+                        print (f"swapping points for triangle {next_triangle_id} to match last point {last_point}")
+                        segments[next_triangle_id_loc, :, :] = segments[next_triangle_id_loc, [1, 0], :]
+                        sides[next_triangle_id_loc, :] = sides[next_triangle_id_loc, [1, 0]]
+                    else:
+                        raise ValueError(f"Next triangle {next_triangle_id} does not have a point close to the last point {last_point}. Distances: {dist_next_point}")
+                    next_point = segments[next_triangle_id_loc, 1, :]
+                    line.append(next_point)
+                    line_triangle_ids.append(next_triangle_id)
+                    used[next_triangle_id_loc] = True
+        # go backward
+        while True and  not np.all(used):
+            print (f"line length = {len(line)}, triangles left = {len(triangles_ids) - np.sum(used)}")
+            first_point = line[0]
+            first_triangle_id = line_triangle_ids[0]
+            first_sides = sides[triangles_ids_inv[first_triangle_id]]
+            next_triangle_id = self.triangle_neighbours[first_triangle_id, first_sides[0]]
+            if next_triangle_id not in triangles_ids:
+                break
+            else:
+                next_triangle_id_loc = triangles_ids_inv[next_triangle_id]
+                if used[next_triangle_id_loc]:
+                    break
+                else:
+                    dist_next_point = np.linalg.norm(segments[next_triangle_id_loc, :, :]-first_point[None, :], axis=1)
+                    if dist_next_point[1] < tol:
+                        pass
+                    elif dist_next_point[0] < tol:
+                        print (f"swapping points for triangle {next_triangle_id} to match first point {first_point}")
+                        segments[next_triangle_id_loc, :, :] = segments[next_triangle_id_loc, [1, 0], :]
+                        sides[next_triangle_id_loc, :] = sides[next_triangle_id_loc, [1, 0]]
+                    else:
+                        raise ValueError(f"Next triangle {next_triangle_id} does not have a point close to the first point {first_point}. Distances: {dist_next_point}")
+                    next_point = segments[next_triangle_id_loc, 0, :]
+                    line.insert(0, next_point)
+                    line_triangle_ids.insert(0, next_triangle_id)
+                    used[next_triangle_id_loc] = True
+        unused = np.where(~used)[0]
+        return (np.array(line), np.array(line_triangle_ids) ), (triangles_ids[unused], sides[unused], segments[unused])
+
+
+
 
 
 def get_wavefunction_on_kpoints(system, kpoints, ibands, batch_size=20):

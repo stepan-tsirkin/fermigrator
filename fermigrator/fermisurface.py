@@ -341,7 +341,7 @@ class FermiSurface:
             self.triangle_neighbours = np.array(neighbours)
         return self.triangle_neighbours
 
-    def plot(self, ax=None, show=True, limits=None, **kwargs):
+    def plot_pyplot(self, ax=None, show=True, limits=None, **kwargs):
         import matplotlib.pyplot as plt
         if ax is None:
             if self.dim == 3:
@@ -385,6 +385,87 @@ class FermiSurface:
             selected.update(new_group)
             previous_group = list(new_group)
         return list(sorted(selected))
+    
+
+    def get_mesh(self):
+        """Return the mesh of the Fermi surface as a tuple of vertices and faces"""
+        triangles = self.triangles_cart
+        vertices = triangles.reshape(-1, 3)
+        tol = 1e-8
+        vertices_round = np.round(vertices / tol).astype(np.int64)
+
+        _, unique_idx, inverse = np.unique(
+            vertices_round,
+            axis=0,
+            return_inverse=True,
+            return_index=True
+        )
+
+        unique_vertices = vertices[unique_idx]
+        faces = inverse.reshape(-1, 3)
+        return unique_vertices, faces
+
+    def plot_plotly(self):
+        unique_vertices, faces = self.get_mesh()
+
+        import plotly.graph_objects as go
+
+        fig = go.Figure(
+            go.Mesh3d(
+                x=unique_vertices[:, 0],
+                y=unique_vertices[:, 1],
+                z=unique_vertices[:, 2],
+                i=faces[:, 0],
+                j=faces[:, 1],
+                k=faces[:, 2],
+                flatshading=False,
+                color="blue",
+                opacity=0.9,
+                lighting=dict(
+                    ambient=0.25,
+                    diffuse=0.9,
+                    specular=1.0,
+                    roughness=0.15,
+                    fresnel=0.3,
+                ),
+
+                lightposition=dict(
+                    x=20,
+                    y=20,
+                    z=20,
+                ),
+            )
+        )
+
+        fig.update_layout(scene_aspectmode="data")
+        fig.show()
+        
+    def plot_pyvista(self):
+        import pyvista as pv
+
+        vertices, faces = self.get_mesh()
+
+        
+        # Convert (N,3) triangle indices into PyVista format
+        pv_faces = np.hstack([cd fe
+            np.full((faces.shape[0], 1), 3),
+            faces
+        ]).astype(np.int64).ravel()
+
+        mesh = pv.PolyData(vertices, pv_faces)
+
+        plotter = pv.Plotter()
+
+        plotter.add_mesh(
+            mesh,
+            color="royalblue",
+            smooth_shading=True,
+            specular=1.0,
+            specular_power=50,
+            roughness=0.1,
+        )
+
+        plotter.show()
 
     def to_pockets(self):
         """Split the Fermi surface into pockets"""

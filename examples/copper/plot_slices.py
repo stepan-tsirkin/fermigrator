@@ -12,7 +12,7 @@ for p in pockets:
     p.to_1bz()
 print ("pockets connected")
 for p in pockets:
-    p.plot()
+    p.plot_pyvista()
 
 exit()
 pocket = pockets[0]

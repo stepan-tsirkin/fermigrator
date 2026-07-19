@@ -46,7 +46,7 @@ class TrajectoryFinder:
             time_list.append(time_list[-1] + dt)
             triangle_index_list.append(triangle_index)
             kpoint_reduced_list.append(kpoint_reduced)
-            if len(kpoint_reduced_list) == 2 and end_kpoint_reduced is None:
+            if not check_cyclic and end_kpoint_reduced is None:
                 end_kpoint_reduced = kpoint_reduced_list[1]
             if check_cyclic and triangle_index_list[-1] == end_triangle_index:  # returned to the starting triangle
                 diff = kpoint_reduced - end_kpoint_reduced

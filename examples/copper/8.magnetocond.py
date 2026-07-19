@@ -22,14 +22,14 @@ for EF in 8.01636, :
         conductivity_tot = np.zeros((len(Btau_list), 3, 3))
         errorbar_tot_sq = np.zeros((len(Btau_list), 3, 3))
         for ib in range(11):
-            fs = FermiSurface.from_file(f"contours/contour_EF={EF:+.5f}_ib={ib:04d}.npz")
+            fs = FermiSurface.from_npz(f"contours/contour_EF={EF:+.5f}_ib={ib:04d}.npz")
             if fs.is_empty:
                 print(f"Skipping empty Fermi surface for EF={EF}, ib={ib}")
                 continue
             print(f"Fermi surface of band {ib} has {fs.num_triangles} ")
             conductivity, errorbar = fs.get_magnetoconductivity_batch(B_dir_cart=B_dir_cart,
                                                                       Btau_list=Btau_list,
-                                                                      num_samples=50000)
+                                                                      num_samples=5000)
             conductivity_tot += conductivity
             errorbar_tot_sq += errorbar**2
         errorbar_tot = np.sqrt(errorbar_tot_sq)

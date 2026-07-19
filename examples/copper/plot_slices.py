@@ -13,7 +13,7 @@ fs.to_1bz()
 # for p in pockets:
 #     p.to_1bz()
 
-axis_cart = np.array([1, 1, 0])
+axis_cart = np.array([0, 0.05, 1])
 axis_cart = axis_cart / np.linalg.norm(axis_cart)
 
 slices_dict, dk = fs.get_slices(axis_cart=axis_cart,

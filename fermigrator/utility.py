@@ -33,3 +33,10 @@ def cached_einsum(subscripts, *operands,
         path = np.einsum_path(subscripts, *operands, optimize=optimize)[0]
         EINSUM_PATH_CACHE[cache_key] = path
     return np.einsum(subscripts, *operands, optimize=path, **kwargs)
+
+
+def smooth_curve_on_boundaries(points_reduced):
+    points_reduced = np.array(points_reduced).copy()
+    diff = np.cumsum(np.round(points_reduced[1:] - points_reduced[:-1]), axis=0)
+    points_reduced[1:] -= diff
+    return points_reduced

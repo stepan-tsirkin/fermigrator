@@ -26,30 +26,36 @@ class TrajectoryFinder:
         self.triangle_neighbours = triangle_neighbours
         self.triangles_centers_reduced = triangles_centers_reduced
 
-    def get_trajectory(self, triangle_index, time_max, kpoint_start_reduced=None):
+    def get_trajectory(self, triangle_index, time_max, kpoint_start_reduced=None,
+                       end_kpoint_reduced=None, end_triangle_index=None):
         if kpoint_start_reduced is None:
             kpoint_start_reduced = self.triangles_centers_reduced[triangle_index]
         kpoint_reduced_list = [kpoint_start_reduced.copy()]
         time_list = [0]
         triangle_index_list = [triangle_index]
+        if end_triangle_index is None:
+            end_triangle_index = triangle_index
         kpoint_reduced = kpoint_start_reduced
         cyclic = False
         check_cyclic = False
         while time_list[-1] < time_max:
-            kpoint_reduced, dt, triangle_index = self.trajectory_step(
+            kpoint_reduced, dt, triangle_index = self.trajectory_step(  # returned to the
                 kpoint_reduced=kpoint_reduced,
                 triangle_index=triangle_index,
             )
             time_list.append(time_list[-1] + dt)
             triangle_index_list.append(triangle_index)
             kpoint_reduced_list.append(kpoint_reduced)
-            if check_cyclic and triangle_index_list[-2] == triangle_index_list[0]:  # returned to the starting triangle
-                diff = np.linalg.norm(kpoint_reduced - kpoint_reduced_list[1])
-                if diff < 1e-8:
+            if len(kpoint_reduced_list) == 2 and end_kpoint_reduced is None:
+                end_kpoint_reduced = kpoint_reduced_list[1]
+            if check_cyclic and triangle_index_list[-1] == end_triangle_index:  # returned to the starting triangle
+                diff = kpoint_reduced - end_kpoint_reduced
+                diff -= np.round(diff)  # account for periodicity
+                diff = np.linalg.norm(diff)
+                if diff < 1e-5:
                     cyclic = True
                     break
             check_cyclic = True
-
         return kpoint_reduced_list, time_list, triangle_index_list, cyclic
 
     def trajectory_step(self,

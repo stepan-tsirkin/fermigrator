@@ -4,7 +4,7 @@ import numpy as np
 from propcache import cached_property
 
 from fermigrator.get_fermi_surface import get_faces, get_shifts_2D, get_shifts_3D
-from .utility import cached_einsum, clear_cached
+from .utility import cached_einsum, clear_cached, smooth_curve_on_boundaries
 from .trajectory import TrajectoryFinder
 from .brillouin import Brillouin
 # Note: There are three types of coordinates used:
@@ -17,7 +17,7 @@ from .brillouin import Brillouin
 from scipy.constants import physical_constants
 elementary_charge = physical_constants["elementary charge"][0]
 hbar = physical_constants["Planck constant over 2 pi"][0]
-coef_Btau = elementary_charge**2 / hbar**2 * 1e-12 * 1e-20  # [ps]*[T] * e^2 / hbar^2 * Ang^2
+coef_Btau = elementary_charge**2 / hbar**2 * 1e-12 * 1e-20  # [ps]*[T] * e^2 / hbar^2 * Ang^2   # approx 2.308e-02
 print(f"coef_Btau = {coef_Btau:.3e}")
 
 
@@ -49,6 +49,7 @@ class FermiSurface:
         self.grid_size = grid_size
         self.triangle_neighbours = triangle_neighbours
         self.is_connected = is_connected
+        self.L = 1
 
     @classmethod
     def from_npz(cls, filename):
@@ -76,6 +77,10 @@ class FermiSurface:
         """map the kpoints to the first Brillouin zone"""
         shifts = self.brillouin.get_shifts(self.triangles_centers_reduced)
         self.triangles_reduced += shifts[:, None, :]
+        clear_cached(self, properties=["triangles_centers_reduced", "basis_vectors_cart", "basis_vectors_reduced",
+                                       "basis_vectors_cart_3", "basis_vectors_reduced_3",
+                                       "basis_vectors_cart_3_inv", "basis_vectors_reduced_3_inv",
+                                       "perpendicular", "triangle_areas", "weights", "gradient_cart"])
 
     def as_dict(self):
         dic = {key: getattr(self, key) for key in self.keys if getattr(self, key) is not None}
@@ -158,12 +163,12 @@ class FermiSurface:
         find [V x B] in the basis of the triangle,
         V = |V| * [v1 x v2] / |v1 x v2|, where v1 and v2 are the basis vectors of the triangle
         therefore using bac-cab rule we can write
-        [V x B] = |V| * (v1 (v2 . B) - v2 (v1 . B)) / (2*area)
+        [V x B] = |V| * (-v1 (v2 . B) + v2 (v1 . B)) / (2*area)
 
         """
         basis = self.basis_vectors_cart
         v_dot_B = basis @ B_cart
-        return (self.gradient_abs / (2 * self.triangle_areas))[:, None] * np.array([v_dot_B[:, 1], -v_dot_B[:, 0]]).T
+        return (self.gradient_abs / (2 * self.triangle_areas))[:, None] * np.array([-v_dot_B[:, 1], v_dot_B[:, 0]]).T
 
     def get_magnetoconductivity_batch(self, B_dir_cart, Btau_list, num_samples, num_batches=10):
         if self.num_triangles / num_samples < 3:
@@ -340,36 +345,6 @@ class FermiSurface:
             self.triangle_neighbours = np.array(neighbours)
         return self.triangle_neighbours
 
-    def plot_pyplot(self, ax=None, show=True, limits=None, **kwargs):
-        import matplotlib.pyplot as plt
-        if ax is None:
-            if self.dim == 3:
-                fig = plt.figure()
-                ax = fig.add_subplot(projection="3d")
-            else:
-                fig, ax = plt.subplots()
-        if self.dim == 2:
-            for tri in self.triangles_cart:
-                ax.fill(tri[:, 0], tri[:, 1], **kwargs)
-            ax.set_xlabel("kx")
-            ax.set_ylabel("ky")
-        elif self.dim == 3:
-            if not hasattr(ax, "add_collection3d"):
-                raise TypeError("For a 3D Fermi surface, ax must be a 3D matplotlib axis (projection='3d').")
-            from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-            poly = Poly3DCollection(self.triangles_cart, **kwargs)
-            ax.add_collection3d(poly)
-            ax.set_xlabel("kx")
-            ax.set_ylabel("ky")
-            ax.set_zlabel("kz")
-        if limits is not None:
-            ax.set_xlim(limits[0])
-            ax.set_ylim(limits[1])
-            if self.dim == 3:
-                ax.set_zlim(limits[2])
-        if show:
-            plt.show()
-
     def get_wavefunctions_at_centers(self, system):
         if self.wavefunctions_center is None:
             self.wavefunctions_center = get_wavefunction_on_kpoints(system, self.kpoints, self.iband)
@@ -403,72 +378,22 @@ class FermiSurface:
         faces = inverse.reshape(-1, 3)
         return unique_vertices, faces
 
-    def plot_plotly(self):
-        unique_vertices, faces = self.get_mesh()
-
-        import plotly.graph_objects as go
-
-        fig = go.Figure(
-            go.Mesh3d(
-                x=unique_vertices[:, 0],
-                y=unique_vertices[:, 1],
-                z=unique_vertices[:, 2],
-                i=faces[:, 0],
-                j=faces[:, 1],
-                k=faces[:, 2],
-                flatshading=False,
-                color="blue",
-                opacity=0.9,
-                lighting=dict(
-                    ambient=0.25,
-                    diffuse=0.9,
-                    specular=1.0,
-                    roughness=0.15,
-                    fresnel=0.3,
-                ),
-
-                lightposition=dict(
-                    x=20,
-                    y=20,
-                    z=20,
-                ),
-            )
-        )
-
-        fig.update_layout(scene_aspectmode="data")
-        fig.show()
-
-    def plot_pyvista(self):
+    def plot_BZ(self, plotter=None):
         import pyvista as pv
 
-        vertices, faces = self.get_mesh()
-
-        # Convert (N,3) triangle indices into PyVista format
-        pv_faces = np.hstack([
-            np.full((faces.shape[0], 1), 3),
-            faces
-        ]).astype(np.int64).ravel()
-
-        mesh = pv.PolyData(vertices, pv_faces)
-
-        plotter = pv.Plotter()
-
-        mesh_FS = mesh.smooth(
-            n_iter=20,
-            relaxation_factor=0.1,
-            feature_smoothing=False,
-        )
+        if plotter is None:
+            plotter = pv.Plotter()
 
         vertices_BZ, faces_BZ, edges_BZ = self.brillouin.boundary
-        print(f"Brillouin zone has {len(vertices_BZ)} vertices and {len(faces_BZ)} faces.")
-        L = np.max(np.ptp(vertices_BZ, axis=0))
-        radius = 0.02 * L
+        # print(f"Brillouin zone has {len(vertices_BZ)} vertices and {len(faces_BZ)} faces.")
+        self.L = np.max(np.ptp(vertices_BZ, axis=0))
+        radius = 0.01 * self.L
 
         lines = np.hstack([
             np.full((len(edges_BZ), 1), 2),
             edges_BZ
         ]).ravel()
-        print(f"lines = {lines}")
+        # print(f"lines = {lines}")
 
         edge_mesh = pv.PolyData(
             vertices_BZ,
@@ -476,16 +401,8 @@ class FermiSurface:
         )
 
         plotter.add_mesh(
-            edge_mesh.tube(radius=0.01 * L),
+            edge_mesh.tube(radius=0.005 * self.L),
             color="black",
-        )
-
-        plotter.add_mesh(
-            mesh_FS,
-            color="royalblue",
-            smooth_shading=True,
-            specular=0.9,
-            specular_power=40,
         )
 
         balls = pv.PolyData(vertices_BZ)
@@ -500,7 +417,40 @@ class FermiSurface:
             color="black",
         )
 
-        plotter.show()
+        return plotter
+
+    def plot_FS(self, plotter=None, color="royalblue", smooth=True, opacity=0.9):
+        import pyvista as pv
+
+        vertices, faces = self.get_mesh()
+
+        # Convert (N,3) triangle indices into PyVista format
+        pv_faces = np.hstack([
+            np.full((faces.shape[0], 1), 3),
+            faces
+        ]).astype(np.int64).ravel()
+
+        mesh = pv.PolyData(vertices, pv_faces)
+
+        if plotter is None:
+            plotter = pv.Plotter()
+
+        mesh_FS = mesh.smooth(
+            n_iter=20,
+            relaxation_factor=0.1,
+            feature_smoothing=False,
+        )
+
+        plotter.add_mesh(
+            mesh_FS,
+            color=color,
+            smooth_shading=True,
+            specular=0.9,
+            specular_power=40,
+            opacity=opacity,
+        )
+
+        return plotter
 
     def to_pockets(self):
         """Split the Fermi surface into pockets"""
@@ -558,6 +508,16 @@ class FermiSurface:
         slices_dict = {}
         axis_cart = np.array(axis_cart)
         axis_cart = axis_cart / np.linalg.norm(axis_cart)
+        lorentz_force_local = self.get_lorentz_force_local(axis_cart)
+        trajectory_finder = TrajectoryFinder(
+            triangles_reduced=self.triangles_reduced,
+            basis_vectors_reduced=self.basis_vectors_reduced,
+            basis_vectors_reduced_3_inv=self.basis_vectors_reduced_3_inv,
+            lorentz_force_local=lorentz_force_local,
+            triangle_neighbours=self.triangle_neighbours,
+            triangles_centers_reduced=self.triangles_centers_reduced
+        )
+
         triangles_corners_proj = self.triangles_cart @ axis_cart
         if k_list is None:
             kz_min = np.min(triangles_corners_proj)
@@ -568,12 +528,53 @@ class FermiSurface:
         else:
             kz = np.array(k_list)
         for k in kz:
-            slices = self.get_segments_kz(k, triangles_corners_proj)
-            lines = self.get_all_connected_lines(*slices)
+            slice_kz = self.get_segments_kz(k, triangles_corners_proj)
+            triangle_ids, sides, segments_reduced = slice_kz
+            print(f"Slice at k={k:.3f} has {len(triangle_ids)} triangles, {len(segments_reduced)} segments.")
+            lines = self.get_all_connected_lines(*slice_kz, min_line_size=0.05)
+            lines = [self.orient_line(*line, B_dir_cart=axis_cart) for line in lines]
+            lines_continuations = [self.get_line_continuation(*line, trajectory_finder=trajectory_finder) for line in lines]
+            print(f"convert into {len(lines)} of {[len(line[0]) for line in lines]}")
             if len(lines) > 0:
-                slices_dict[k] = lines
+                slices_dict[k] = lines, lines_continuations
         dk = kz[1] - kz[0] if len(kz) > 1 else None
         return slices_dict, dk
+
+    def orient_line(self, line_kpoints_red, line_triangle_ids, B_dir_cart):
+        """orients the line such that the force [v x B] is pointing in the same direction as the tangent of the line.
+        This corresponds to propagation BACKWARDS in time, which we need for magnetoconductivity.
+        """
+        line_kpoints_cart = line_kpoints_red @ self.recip_lattice
+        vecs_cart = line_kpoints_cart[1:] - line_kpoints_cart[:-1]
+        perp_cart = self.perpendicular[line_triangle_ids]
+        B_dir_cart = np.array([B_dir_cart] * len(line_triangle_ids))
+        matrix_list = np.stack([vecs_cart[:, :], perp_cart[:, :], B_dir_cart[:, :]], axis=1)
+        # print(f"matrix_list.shape = {matrix_list.shape}")
+        det = np.linalg.det(matrix_list)
+        num_positive = np.sum(det > 1e-6)
+        num_negative = np.sum(det < -1e-6)
+        if num_negative * num_positive > 0:
+            raise ValueError(f"Line has both positive and negative orientation with respect to B_dir_cart={B_dir_cart}.")
+        if num_negative > 0:
+            line_kpoints_red = line_kpoints_red[::-1]
+            line_triangle_ids = line_triangle_ids[::-1]
+        return line_kpoints_red, line_triangle_ids
+
+    def get_line_continuation(self, line_kpoints_red, line_triangle_ids, trajectory_finder):
+        """get the continuation of the line in both directions, until it leaves the Brillouin zone"""
+        if np.allclose(line_kpoints_red[0], line_kpoints_red[-1]):
+            # line is closed, no need to continue
+            return np.zeros((0, 3), dtype=float), np.zeros((0,), dtype=int)
+        line_kpoints_red, time_list, line_triangle_ids, cyclic = trajectory_finder.get_trajectory(
+            line_triangle_ids[-1],
+            10,
+            line_kpoints_red[-2],
+            line_kpoints_red[0],
+            line_triangle_ids[0],
+        )
+        print(f"Line continuation has {len(line_kpoints_red)} points, cyclic={cyclic}.")
+        line_kpoints_red = smooth_curve_on_boundaries(line_kpoints_red)
+        return line_kpoints_red, line_triangle_ids
 
     def get_segments_kz(self, kz, triangles_corners_proj):
         """
@@ -595,10 +596,23 @@ class FermiSurface:
         segments : np.ndarray((N, 2, 3), dtype=float)
             The coordinates of the segments that cross the k=kz plane. Each segment is defined by two points in 3D space. (reduced coordinates)
         """
-        above = triangles_corners_proj > kz
-        below = triangles_corners_proj < kz
-        above_any = np.any(above, axis=1)  # should it be >= ?
-        below_any = np.any(below, axis=1)  # should it be <= ?
+        epsilon = 5e-5
+        kz0 = kz
+        step_kz = 1e-6
+        while True:
+            # to avoid unstabilities when the plane intersects with triangle corners,
+            # because in this case it is not clear, what side is intersecting
+            above = triangles_corners_proj >= kz - epsilon
+            below = triangles_corners_proj <= kz + epsilon
+            if not np.any(above * below):
+                break
+            else:
+                # print (f"increasing kz from {kz:.6f} to {kz+step_kz:.6f} to avoid intersection with triangle corners.")
+                kz += step_kz
+            if abs(kz - kz0) > 1e-3:
+                raise ValueError(f"Cannot find a plane that does not intersect any triangle. Original kz={kz0}, current kz={kz}.")
+        above_any = np.any(above, axis=1)
+        below_any = np.any(below, axis=1)
         triangle_ids = np.where(above_any & below_any)[0]
         N = len(triangle_ids)
         segments_reduced = np.zeros((N, 2, 3))
@@ -607,36 +621,38 @@ class FermiSurface:
             proj = triangles_corners_proj[id]
             above_loc = above[id]
             below_loc = below[id]
-            segments_loc = []
+            assert np.sum(above_loc) + np.sum(below_loc) == 3, f"Triangle {id} with vertices {self.triangles_cart[id]} does not have 2 vertices above and 1 below or 1 above and 2 below the plane k={kz}. Found {np.sum(above_loc)} above and {np.sum(below_loc)} below."
+            segment_loc = []
             sides_loc = []
             for iside, side in enumerate(self.triangle_side_order):
                 if (above_loc[side[0]] and below_loc[side[1]]) or (above_loc[side[1]] and below_loc[side[0]]):
                     sides_loc.append(iside)
                     a = (proj[side[0]] - kz) / (proj[side[0]] - proj[side[1]])
                     point = self.triangles_reduced[id, side[0], :] * (1 - a) + self.triangles_reduced[id, side[1], :] * a
-                    segments_loc.append(point)
-                if len(segments_loc) == 2:
-                    break
-            if len(segments_loc) != 2:
-                raise ValueError(f"Triangle {id} does not have 2 intersection points with the plane k={kz}. Found {len(segments_loc)} points.")
-            segments_reduced[i, :, :] = segments_loc
+                    segment_loc.append(point)
+            if len(segment_loc) != 2:
+                raise ValueError(f"Triangle {id} with vertices {self.triangles_cart[id]} does not have 2 intersection points with the plane k={kz}. Found {len(segment_loc)} points, segments={segment_loc @ self.recip_lattice}.")
+            segments_reduced[i, :, :] = segment_loc
             sides[i, :] = sides_loc
         return triangle_ids, sides, segments_reduced
 
-    def get_all_connected_lines(self, triangles_ids, sides, segments, tol=1e-6):
+    def get_all_connected_lines(self, triangles_ids, sides, segments, tol=1e-6, min_line_size=0.05):
         lines = []
         while len(triangles_ids) > 0:
-            line, (triangles_ids, sides, segments) = self.get_connected_line(triangles_ids, sides, segments, tol=tol)
-            lines.append(line)
+            (line_kpoints_red, line_triangle_ids), (triangles_ids, sides, segments) = self.get_connected_line(triangles_ids, sides, segments, tol=tol)
+            if len(line_kpoints_red) > 2:
+                line_size = np.linalg.norm((line_kpoints_red[1:] - line_kpoints_red[:-1]) @ self.recip_lattice, axis=1).sum()
+                if line_size >= min_line_size:
+                    lines.append((line_kpoints_red, line_triangle_ids))
         return lines
 
-    def get_connected_line(self, triangles_ids, sides, segments, tol=1e-6, plane_normal_cart=np.zeros(3)):
+    def get_connected_line(self, triangles_ids, sides, segments, tol=1e-6):
         triangles_ids_inv = {id: i for i, id in enumerate(triangles_ids)}
         used = np.zeros(len(triangles_ids), dtype=bool)
         line = [segments[0, 0, :], segments[0, 1, :]]
         line_triangle_ids = [triangles_ids[0]]
         used[0] = True
-        # go forward
+        # go forwardline_kpoints_red, line_triangle_ids
 
         def propagate(direction):
             """direction = 1 for forward, 0 for backward"""
@@ -646,18 +662,21 @@ class FermiSurface:
                 last_sides = sides[triangles_ids_inv[last_triangle_id]]
                 next_triangle_id = self.triangle_neighbours[last_triangle_id, last_sides[direction]]
                 if next_triangle_id not in triangles_ids:
+                    # print (f"propagating {direction}: Triangle {last_triangle_id} has neighbour {next_triangle_id} on side {last_sides[direction]}, but it is not in the list of triangles . Stopping propagation with {len(line)} points.")
                     break
                 else:
                     next_triangle_id_loc = triangles_ids_inv[next_triangle_id]
                     if used[next_triangle_id_loc]:
+                        print(f"prapagating {direction}: Triangle {next_triangle_id} has already been used. Stopping propagation.")
                         break
                     else:
                         next_segment = segments[next_triangle_id_loc]
                         diff = next_segment - last_point[None, :]
-                        g = np.round(np.mean(diff, axis=0))
-                        if np.dot(plane_normal_cart, g @ self.recip_lattice) > tol:
-                            break
-                        diff -= g[None, :]
+                        # g = np.round(np.mean(diff, axis=0))
+                        # if np.dot(plane_normal_cart, g @ self.recip_lattice) > tol:
+                        #     break
+                        # diff -= g[None, :]
+                        g = np.zeros(3)
 
                         dist_next_point = np.linalg.norm(diff, axis=1)
 

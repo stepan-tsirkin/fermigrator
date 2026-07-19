@@ -1,6 +1,5 @@
 
 
-import warnings
 
 import numpy as np
 from propcache import cached_property
@@ -8,6 +7,7 @@ from propcache import cached_property
 from fermigrator.get_fermi_surface import get_faces, get_shifts_2D, get_shifts_3D
 from .utility import cached_einsum, clear_cached
 from .trajectory import TrajectoryFinder
+from .brillouin import Brillouin
 # Note: There are three types of coordinates used:
 # * Cartesian "cart"
 # * Reduced "reduced" (in the basis of the reciprocal lattice vectors)
@@ -68,6 +68,15 @@ class FermiSurface:
     @cached_property
     def cell_volume(self):
         return (2 * np.pi)**self.dim / self.recip_volume
+    
+    @cached_property
+    def brillouin(self):
+        return Brillouin(self.recip_lattice)
+    
+    def to_1bz(self):
+        """map the kpoints to the first Brillouin zone"""
+        shifts = self.brillouin.get_shifts(self.triangles_centers_reduced)
+        self.triangles_reduced += shifts[:, None, :]
 
     def as_dict(self):
         dic = {key: getattr(self, key) for key in self.keys if getattr(self, key) is not None}
@@ -560,72 +569,6 @@ class FermiSurface:
         return (np.array(line), np.array(line_triangle_ids) ), (triangles_ids[unused], sides[unused], segments[unused])
 
 
-    def _get_connected_line(self, triangles_ids, sides, segments, tol=1e-6):
-        triangles_ids_inv = {id: i for i, id in enumerate(triangles_ids)}
-        used = np.zeros(len(triangles_ids), dtype=bool)
-        line = [segments[0, 0, :], segments[0, 1, :]]
-        line_triangle_ids = [triangles_ids[0]]
-        used[0] = True
-        # go forward
-        while True and  not np.all(used):
-            print (f"line length = {len(line)}, triangles left = {len(triangles_ids) - np.sum(used)}")
-            last_point = line[-1]
-            last_triangle_id = line_triangle_ids[-1]
-            last_sides = sides[triangles_ids_inv[last_triangle_id]]
-            next_triangle_id = self.triangle_neighbours[last_triangle_id, last_sides[1]]
-            if next_triangle_id not in triangles_ids:
-                break
-            else:
-                next_triangle_id_loc = triangles_ids_inv[next_triangle_id]
-                if used[next_triangle_id_loc]:
-                    break
-                else:
-                    dist_next_point = np.linalg.norm(segments[next_triangle_id_loc, :, :]-last_point[None, :], axis=1)
-                    if dist_next_point[0] < tol:
-                        pass
-                    elif dist_next_point[1] < tol:
-                        print (f"swapping points for triangle {next_triangle_id} to match last point {last_point}")
-                        segments[next_triangle_id_loc, :, :] = segments[next_triangle_id_loc, [1, 0], :]
-                        sides[next_triangle_id_loc, :] = sides[next_triangle_id_loc, [1, 0]]
-                    else:
-                        raise ValueError(f"Next triangle {next_triangle_id} does not have a point close to the last point {last_point}. Distances: {dist_next_point}")
-                    next_point = segments[next_triangle_id_loc, 1, :]
-                    line.append(next_point)
-                    line_triangle_ids.append(next_triangle_id)
-                    used[next_triangle_id_loc] = True
-        # go backward
-        while True and  not np.all(used):
-            print (f"line length = {len(line)}, triangles left = {len(triangles_ids) - np.sum(used)}")
-            first_point = line[0]
-            first_triangle_id = line_triangle_ids[0]
-            first_sides = sides[triangles_ids_inv[first_triangle_id]]
-            next_triangle_id = self.triangle_neighbours[first_triangle_id, first_sides[0]]
-            if next_triangle_id not in triangles_ids:
-                break
-            else:
-                next_triangle_id_loc = triangles_ids_inv[next_triangle_id]
-                if used[next_triangle_id_loc]:
-                    break
-                else:
-                    dist_next_point = np.linalg.norm(segments[next_triangle_id_loc, :, :]-first_point[None, :], axis=1)
-                    if dist_next_point[1] < tol:
-                        pass
-                    elif dist_next_point[0] < tol:
-                        print (f"swapping points for triangle {next_triangle_id} to match first point {first_point}")
-                        segments[next_triangle_id_loc, :, :] = segments[next_triangle_id_loc, [1, 0], :]
-                        sides[next_triangle_id_loc, :] = sides[next_triangle_id_loc, [1, 0]]
-                    else:
-                        raise ValueError(f"Next triangle {next_triangle_id} does not have a point close to the first point {first_point}. Distances: {dist_next_point}")
-                    next_point = segments[next_triangle_id_loc, 0, :]
-                    line.insert(0, next_point)
-                    line_triangle_ids.insert(0, next_triangle_id)
-                    used[next_triangle_id_loc] = True
-        unused = np.where(~used)[0]
-        return (np.array(line), np.array(line_triangle_ids) ), (triangles_ids[unused], sides[unused], segments[unused])
-
-
-
-
 
 def get_wavefunction_on_kpoints(system, kpoints, ibands, batch_size=20):
     print(f"Evaluating wavefunctions at {len(kpoints)} k-points for band(s) {ibands}...")
@@ -651,3 +594,5 @@ def iterate_pm(dim):
         for j in iterate_pm(dim - 1):
             res.append([i] + j)
     return res
+
+

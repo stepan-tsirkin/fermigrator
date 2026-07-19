@@ -4,7 +4,7 @@ from fermigrator.linewidth import getDOS
 from matplotlib import pyplot as plt
 
 EF0 = np.load("efermi.npz")["EF"]
-V0=2
+V0 = 2
 
 contour_db = ContourDatabase.read("contours")
 
@@ -64,8 +64,8 @@ for i, Efermi in enumerate(sorted(linewidth_dict.keys())):
         if np.mean(lw) < 100000:
             x.append(float(Efermi))
             y.append(np.mean(lw))
-    dos.append( getDOS(contour_db, Efermi) )
-x = np.array(x)-EF0
+    dos.append(getDOS(contour_db, Efermi))
+x = np.array(x) - EF0
 srt = np.argsort(x)
 x = x[srt]
 y = np.array(y)[srt]
@@ -74,10 +74,10 @@ dos = np.array(dos)[srt]
 dx = x[1:] - x[:-1]
 dos_sum = sum((dos[:-1] + dos[1:]) / 2 * dx)
 
-print (f"Integral of DOS over Efermi: {dos_sum:.2f} states/unit cell")
+print(f"Integral of DOS over Efermi: {dos_sum:.2f} states/unit cell")
 
 axes.plot(x, y, "o", label="Linewidth")
-axes.plot(x, (dos*V0**2)/4, "x", label=f"DOS*V0^2/4, V0={V0} eV") 
+axes.plot(x, (dos * V0**2) / 4, "x", label=f"DOS*V0^2/4, V0={V0} eV")
 axes.set_xlabel(r"$E-E_F$ (eV)")
 axes.set_ylabel("Average linewidth")
 axes.grid()
@@ -85,4 +85,3 @@ axes.set_title("Linewidth vs Efermi")
 axes.legend()
 plt.savefig(f"linewidths_vs_Efermi-{method}.png")
 plt.close()
-

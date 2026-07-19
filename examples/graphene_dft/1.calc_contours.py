@@ -20,6 +20,6 @@ grid = wb.Grid(db.system, NK=(300, 300, 1), NKFFT=(10, 10, 1))
 db.evaluate_E_grid(grid=grid, ignore_existing=True)
 EF0 = -4.239
 get_contours_and_WFs(contours_db=db,
-                     Efermi_list=np.linspace(EF0-1, EF0+1, 41),
+                     Efermi_list=np.linspace(EF0 - 1, EF0 + 1, 41),
                      ignore_existing=False
                      )

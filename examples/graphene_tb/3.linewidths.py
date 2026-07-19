@@ -4,7 +4,7 @@ from fermigrator.linewidth import getDOS
 from matplotlib import pyplot as plt
 
 EF0 = np.load("efermi.npz")["EF"]
-V0=1
+V0 = 1
 
 contour_db = ContourDatabase.read("contours")
 
@@ -27,10 +27,10 @@ for method in ["direct", "multipole"]:
     if nfermi % ncols != 0:
         nrows += 1
     fig, axes = plt.subplots(nrows, ncols, figsize=(
-        6*ncols, 6*nrows), layout="tight")
+        6 * ncols, 6 * nrows), layout="tight")
     _, recip_lattice = contour_db.get_E_grid()
     for i, Efermi in enumerate(sorted(linewidth_dict.keys())):
-        ax = axes[i//ncols, i % ncols]
+        ax = axes[i // ncols, i % ncols]
         for ib, lw in linewidth_dict[Efermi].items():
             contour = contour_db.get_data("contour", ib=ib, EF=Efermi)
             kpoints = contour["kpoints"]
@@ -44,15 +44,15 @@ for method in ["direct", "multipole"]:
             cbar.set_label("Linewidth", rotation=270, labelpad=15)
             # fig.colorbar(sc, ax=ax)
         ax.set_title(
-            f"Efermi={float(Efermi):.2f}, tau={vmin:.2e}+-{(vmax-vmin)/2:.2e}")
+            f"Efermi={float(Efermi):.2f}, tau={vmin:.2e}+-{(vmax - vmin) / 2:.2e}")
         ax.set_xlim(0, 10)
         ax.set_ylim(-3, 7)
         # set aspect ratio to 1
         ax.set_aspect("equal")
 
     # remove empty subplots
-    for j in range(i+1, nrows*ncols):
-        fig.delaxes(axes[j//ncols, j % ncols])
+    for j in range(i + 1, nrows * ncols):
+        fig.delaxes(axes[j // ncols, j % ncols])
 
     plt.savefig(f"linewidths-{method}.png")
     plt.close()
@@ -71,14 +71,14 @@ for method in ["direct", "multipole"]:
                 x.append(float(Efermi))
                 y.append(np.mean(lw))
         dos_x.append(float(Efermi))
-        dos.append( getDOS(contour_db, Efermi) )
-    x = np.array(x)-EF0
+        dos.append(getDOS(contour_db, Efermi))
+    x = np.array(x) - EF0
     srt = np.argsort(x)
     x = x[srt]
     y = np.array(y)[srt]
-    
-    dos = np.array(dos) 
-    dos_x = np.array(dos_x)-EF0
+
+    dos = np.array(dos)
+    dos_x = np.array(dos_x) - EF0
 
     srt = np.argsort(dos_x)
     dos_x = dos_x[srt]
@@ -87,10 +87,10 @@ for method in ["direct", "multipole"]:
     dx = dos_x[1:] - dos_x[:-1]
     dos_sum = sum((dos[:-1] + dos[1:]) / 2 * dx)
 
-    print (f"Integral of DOS over Efermi: {dos_sum:.2f} states/unit cell")
+    print(f"Integral of DOS over Efermi: {dos_sum:.2f} states/unit cell")
 
     axes.plot(x, y, "o", label="Linewidth")
-    axes.plot(dos_x, (dos*V0**2)/4, "x", label=f"DOS*V0^2/4, V0={V0} eV") 
+    axes.plot(dos_x, (dos * V0**2) / 4, "x", label=f"DOS*V0^2/4, V0={V0} eV")
     axes.set_xlabel(r"$E-E_F$ (eV)")
     axes.set_ylabel("Average linewidth")
     axes.grid()
@@ -98,4 +98,3 @@ for method in ["direct", "multipole"]:
     axes.legend()
     plt.savefig(f"linewidths_vs_Efermi-{method}.png")
     plt.close()
-

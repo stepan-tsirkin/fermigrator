@@ -1,6 +1,5 @@
 
 
-
 import numpy as np
 from propcache import cached_property
 
@@ -68,11 +67,11 @@ class FermiSurface:
     @cached_property
     def cell_volume(self):
         return (2 * np.pi)**self.dim / self.recip_volume
-    
+
     @cached_property
     def brillouin(self):
         return Brillouin(self.recip_lattice)
-    
+
     def to_1bz(self):
         """map the kpoints to the first Brillouin zone"""
         shifts = self.brillouin.get_shifts(self.triangles_centers_reduced)
@@ -385,7 +384,6 @@ class FermiSurface:
             selected.update(new_group)
             previous_group = list(new_group)
         return list(sorted(selected))
-    
 
     def get_mesh(self):
         """Return the mesh of the Fermi surface as a tuple of vertices and faces"""
@@ -439,15 +437,14 @@ class FermiSurface:
 
         fig.update_layout(scene_aspectmode="data")
         fig.show()
-        
+
     def plot_pyvista(self):
         import pyvista as pv
 
         vertices, faces = self.get_mesh()
 
-        
         # Convert (N,3) triangle indices into PyVista format
-        pv_faces = np.hstack([cd fe
+        pv_faces = np.hstack([
             np.full((faces.shape[0], 1), 3),
             faces
         ]).astype(np.int64).ravel()
@@ -456,13 +453,51 @@ class FermiSurface:
 
         plotter = pv.Plotter()
 
+        mesh_FS = mesh.smooth(
+            n_iter=20,
+            relaxation_factor=0.1,
+            feature_smoothing=False,
+        )
+
+        vertices_BZ, faces_BZ, edges_BZ = self.brillouin.boundary
+        print(f"Brillouin zone has {len(vertices_BZ)} vertices and {len(faces_BZ)} faces.")
+        L = np.max(np.ptp(vertices_BZ, axis=0))
+        radius = 0.02 * L
+
+        lines = np.hstack([
+            np.full((len(edges_BZ), 1), 2),
+            edges_BZ
+        ]).ravel()
+        print(f"lines = {lines}")
+
+        edge_mesh = pv.PolyData(
+            vertices_BZ,
+            lines=lines
+        )
+
         plotter.add_mesh(
-            mesh,
+            edge_mesh.tube(radius=0.01 * L),
+            color="black",
+        )
+
+        plotter.add_mesh(
+            mesh_FS,
             color="royalblue",
             smooth_shading=True,
-            specular=1.0,
-            specular_power=50,
-            roughness=0.1,
+            specular=0.9,
+            specular_power=40,
+        )
+
+        balls = pv.PolyData(vertices_BZ)
+        balls = balls.glyph(
+            geom=pv.Sphere(radius=radius),
+            scale=False,
+            orient=False,
+        )
+
+        plotter.add_mesh(
+            balls,
+            color="black",
         )
 
         plotter.show()
@@ -518,7 +553,6 @@ class FermiSurface:
             previous_group = list(new_group)
             checked.update(new_group)
 
-
     def get_slices(self, axis_cart=[0, 0, 1], dk=0.1, k_list=None):
         """get slices of the Fermi surface along a given axis"""
         slices_dict = {}
@@ -530,22 +564,20 @@ class FermiSurface:
             kz_max = np.max(triangles_corners_proj)
             nk = int(np.ceil((kz_max - kz_min) / dk))
             dk = (kz_max - kz_min) / nk
-            kz = np.linspace(kz_min + dk/2, kz_max-dk/2, nk, endpoint=True)
+            kz = np.linspace(kz_min + dk / 2, kz_max - dk / 2, nk, endpoint=True)
         else:
             kz = np.array(k_list)
         for k in kz:
             slices = self.get_segments_kz(k, triangles_corners_proj)
             lines = self.get_all_connected_lines(*slices)
-            if len(lines)>0:
+            if len(lines) > 0:
                 slices_dict[k] = lines
-        dk = kz[1] - kz[0] if len(kz)>1 else None
+        dk = kz[1] - kz[0] if len(kz) > 1 else None
         return slices_dict, dk
-            
-
 
     def get_segments_kz(self, kz, triangles_corners_proj):
         """
-        get the segments of crossing k=kz plane with the triangles of the Fermi surface. 
+        get the segments of crossing k=kz plane with the triangles of the Fermi surface.
 
         Parameters
         ----------
@@ -591,14 +623,13 @@ class FermiSurface:
             sides[i, :] = sides_loc
         return triangle_ids, sides, segments_reduced
 
-
     def get_all_connected_lines(self, triangles_ids, sides, segments, tol=1e-6):
         lines = []
         while len(triangles_ids) > 0:
             line, (triangles_ids, sides, segments) = self.get_connected_line(triangles_ids, sides, segments, tol=tol)
             lines.append(line)
-        return lines                
-    
+        return lines
+
     def get_connected_line(self, triangles_ids, sides, segments, tol=1e-6, plane_normal_cart=np.zeros(3)):
         triangles_ids_inv = {id: i for i, id in enumerate(triangles_ids)}
         used = np.zeros(len(triangles_ids), dtype=bool)
@@ -606,9 +637,10 @@ class FermiSurface:
         line_triangle_ids = [triangles_ids[0]]
         used[0] = True
         # go forward
+
         def propagate(direction):
             """direction = 1 for forward, 0 for backward"""
-            while True and  not np.all(used):
+            while True and not np.all(used):
                 last_point = line[-direction]
                 last_triangle_id = line_triangle_ids[-direction]
                 last_sides = sides[triangles_ids_inv[last_triangle_id]]
@@ -619,17 +651,17 @@ class FermiSurface:
                     next_triangle_id_loc = triangles_ids_inv[next_triangle_id]
                     if used[next_triangle_id_loc]:
                         break
-                    else:   
+                    else:
                         next_segment = segments[next_triangle_id_loc]
-                        diff = next_segment-last_point[None, :]
+                        diff = next_segment - last_point[None, :]
                         g = np.round(np.mean(diff, axis=0))
-                        if np.dot(plane_normal_cart, g @ self.recip_lattice)>tol:
+                        if np.dot(plane_normal_cart, g @ self.recip_lattice) > tol:
                             break
-                        diff -=g[None,:]
+                        diff -= g[None, :]
 
                         dist_next_point = np.linalg.norm(diff, axis=1)
 
-                        if dist_next_point[1-direction] < tol:
+                        if dist_next_point[1 - direction] < tol:
                             pass
                         elif dist_next_point[direction] < tol:
                             segments[next_triangle_id_loc, :, :] = segments[next_triangle_id_loc, [1, 0], :]
@@ -647,8 +679,7 @@ class FermiSurface:
         propagate(direction=1)
         propagate(direction=0)
         unused = np.where(~used)[0]
-        return (np.array(line), np.array(line_triangle_ids) ), (triangles_ids[unused], sides[unused], segments[unused])
-
+        return (np.array(line), np.array(line_triangle_ids)), (triangles_ids[unused], sides[unused], segments[unused])
 
 
 def get_wavefunction_on_kpoints(system, kpoints, ibands, batch_size=20):
@@ -675,5 +706,3 @@ def iterate_pm(dim):
         for j in iterate_pm(dim - 1):
             res.append([i] + j)
     return res
-
-

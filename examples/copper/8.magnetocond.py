@@ -5,11 +5,11 @@ import numpy as np
 from sys import argv
 
 
-theta_start = int(argv[1]) 
-theta_step = int(argv[2]) 
+theta_start = int(argv[1])
+theta_step = int(argv[2])
 for EF in 8.01636, :
-    for theta_deg in range(theta_start, 91,theta_step):
-        print (f"Processing EF={EF}, theta={theta_deg} degrees...")
+    for theta_deg in range(theta_start, 91, theta_step):
+        print(f"Processing EF={EF}, theta={theta_deg} degrees...")
         B_dir_str = f"theta={theta_deg:d}"
         fname = f"magnetoconductivity_EF={EF:+.5f}_{B_dir_str}_50000.npz"
         if os.path.exists(fname):
@@ -18,8 +18,6 @@ for EF in 8.01636, :
         theta = np.deg2rad(theta_deg)
         Btau_list = np.linspace(0.0, 40, 100)
         B_dir_cart = np.array([0, np.sin(theta), np.cos(theta)])
-
-        
 
         conductivity_tot = np.zeros((len(Btau_list), 3, 3))
         errorbar_tot_sq = np.zeros((len(Btau_list), 3, 3))

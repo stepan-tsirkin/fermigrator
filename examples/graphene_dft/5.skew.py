@@ -4,7 +4,7 @@ from fermigrator.linewidth import getDOS
 from matplotlib import pyplot as plt
 
 EF0 = np.load("efermi.npz")["EF"]
-V0=3
+V0 = 3
 
 contour_db = ContourDatabase.read("contours")
 
@@ -27,10 +27,10 @@ for method in ["multipole", "direct"]:
     if nfermi % ncols != 0:
         nrows += 1
     fig, axes = plt.subplots(nrows, ncols, figsize=(
-        6*ncols, 6*nrows), layout="tight")
+        6 * ncols, 6 * nrows), layout="tight")
     _, recip_lattice = contour_db.get_E_grid()
     for i, Efermi in enumerate(sorted(skew_dict.keys())):
-        ax = axes[i//ncols, i % ncols]
+        ax = axes[i // ncols, i % ncols]
         for ib, lw in skew_dict[Efermi].items():
             contour = contour_db.get_data("contour", ib=ib, EF=Efermi)
             kpoints = contour["kpoints"]
@@ -44,15 +44,15 @@ for method in ["multipole", "direct"]:
             cbar.set_label("Skew", rotation=270, labelpad=15)
             # fig.colorbar(sc, ax=ax)
         ax.set_title(
-            f"Efermi={float(Efermi):.2f}, tau={vmin:.2e}+-{(vmax-vmin)/2:.2e}")
+            f"Efermi={float(Efermi):.2f}, tau={vmin:.2e}+-{(vmax - vmin) / 2:.2e}")
         ax.set_xlim(0, 10)
         ax.set_ylim(-3, 7)
         # set aspect ratio to 1
         ax.set_aspect("equal")
 
     # remove empty subplots
-    for j in range(i+1, nrows*ncols):
-        fig.delaxes(axes[j//ncols, j % ncols])
+    for j in range(i + 1, nrows * ncols):
+        fig.delaxes(axes[j // ncols, j % ncols])
 
     plt.savefig(f"skew-{method}.png")
     plt.close()
@@ -71,9 +71,9 @@ for method in ["multipole", "direct"]:
                 x.append(float(Efermi))
                 y.append(np.mean(lw))
         edos.append(float(Efermi))
-        dos.append( getDOS(contour_db, Efermi) )
-    x = np.array(x)-EF0
-    edos = np.array(edos)-EF0
+        dos.append(getDOS(contour_db, Efermi))
+    x = np.array(x) - EF0
+    edos = np.array(edos) - EF0
     srt = np.argsort(edos)
     edos = edos[srt]
     dos = np.array(dos)[srt]
@@ -81,10 +81,10 @@ for method in ["multipole", "direct"]:
     de = np.array(edos)[1:] - np.array(edos)[:-1]
     dos_sum = sum((dos[:-1] + dos[1:]) / 2 * de)
 
-    print (f"Integral of DOS over Efermi: {dos_sum:.2f} states/unit cell")
+    print(f"Integral of DOS over Efermi: {dos_sum:.2f} states/unit cell")
 
     axes.plot(x, y, "o", label="Skew")
-    # axes.plot(x, (dos*dos*V0**3)/8, "x", label=f"DOS^2*V0^3/8, V0={V0} eV") 
+    # axes.plot(x, (dos*dos*V0**3)/8, "x", label=f"DOS^2*V0^3/8, V0={V0} eV")
     axes.set_xlabel(r"$E-E_F$ (eV)")
     axes.set_ylabel("Average skew")
     axes.grid()
@@ -92,4 +92,3 @@ for method in ["multipole", "direct"]:
     axes.legend()
     plt.savefig(f"skew_vs_Efermi-{method}.png")
     plt.close()
-

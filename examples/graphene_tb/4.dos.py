@@ -18,7 +18,7 @@ for i, Efermi in enumerate(sorted(dos_dict.keys())):
     y.append(dos_dict[Efermi])
 
 
-y=np.array(y)
+y = np.array(y)
 system = contour_db.system
 
 

@@ -10,7 +10,7 @@ contour_db = ContourDatabase.read("contours")
 
 linewidth_dict = defaultdict(lambda: {})
 for Efermi in contour_db.get_all_Efermi_float():
-    rnd = Efermi/0.09
+    rnd = Efermi / 0.09
     if abs(rnd - round(rnd)) > 1e-3:
         continue
     for ib in contour_db.get_all_bands(Efermi):
@@ -20,9 +20,9 @@ nfermi = len(linewidth_dict)
 ncols = 2
 nrows = nfermi
 
-print (f"Plotting linewidths for {nfermi} Efermi values in {nrows} rows and {ncols} columns")
+print(f"Plotting linewidths for {nfermi} Efermi values in {nrows} rows and {ncols} columns")
 fig, axes = plt.subplots(nrows, ncols, figsize=(
-    6*ncols, 6*nrows), layout="tight")
+    6 * ncols, 6 * nrows), layout="tight")
 _, recip_lattice = contour_db.get_E_grid()
 axes_cnt = 0
 
@@ -33,7 +33,7 @@ for i, Efermi in enumerate(sorted(linewidth_dict.keys())):
         kpoints = contour["kpoints"]
         kpoints_cart = kpoints @ recip_lattice
         for s in range(lw.shape[1]):
-            ax = axes[axes_cnt//ncols, axes_cnt % ncols]
+            ax = axes[axes_cnt // ncols, axes_cnt % ncols]
             axes_cnt += 1
             lws = lw[:, s]
             sc = ax.scatter(
@@ -45,11 +45,11 @@ for i, Efermi in enumerate(sorted(linewidth_dict.keys())):
             cbar.set_label("Linewidth", rotation=270, labelpad=15)
             # fig.colorbar(sc, ax=ax)
             ax.set_title(
-                f"Ef={float(Efermi):.2f}, s={s} t={vmin:.2e}+-{(vmax-vmin)/2:.2e}")
+                f"Ef={float(Efermi):.2f}, s={s} t={vmin:.2e}+-{(vmax - vmin) / 2:.2e}")
             ax.set_xlim(-1, 10)
             ax.set_ylim(-3, 8)
             # set aspect ratio to 1
-            ax.set_aspect("equal")  
+            ax.set_aspect("equal")
 
 # # remove empty subplots
 # for j in range(axes_cnt, nrows*ncols):

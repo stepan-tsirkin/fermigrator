@@ -31,7 +31,7 @@ def graphene_ptb(delta=0, hop1=-1.0):
 system = System_R.from_pythtb(Haldane_ptb(delta=0, phi=0, hop1=1, hop2=0))
 
 
-nspin=2
+nspin = 2
 if nspin == 2:
     system.double_spin()
 system.set_pointgroup(["C6z", "Inversion", "TimeReversal"])

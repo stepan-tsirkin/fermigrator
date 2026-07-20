@@ -21,6 +21,6 @@ db.evaluate_E_grid(grid=grid, ignore_existing=True)
 EF0 = np.load("efermi.npz")["EF"]
 for s in +1, -1:
     get_contours_and_WFs(contours_db=db,
-                        Efermi_list=np.linspace(EF0+s*5, EF0+s*1, 41),
-                        ignore_existing=False
-                        )
+                         Efermi_list=np.linspace(EF0 + s * 5, EF0 + s * 1, 41),
+                         ignore_existing=False
+                         )

@@ -20,6 +20,6 @@ grid = wb.Grid(db.system, NK=(300, 300, 1), NKFFT=(10, 10, 1))
 db.evaluate_E_grid(grid=grid, ignore_existing=True)
 EF0 = np.load("efermi.npz")["EF"]
 db.set_fermi_surfaces(
-                     Efermi_list=np.linspace(EF0-3, EF0+3, 61),
-                     ignore_existing=False
-                     )
+    Efermi_list=np.linspace(EF0 - 3, EF0 + 3, 61),
+    ignore_existing=False
+)
